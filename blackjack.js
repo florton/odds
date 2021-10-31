@@ -1,4 +1,6 @@
-const playerMoves = require('./output.json')
+// const playerMoves = require('./output.json')
+const playerMoves = require('./outputS.json')
+// const playerMoves = require('./basic.json')
 
 const deckCards = [1,2,3,4,5,6,7,8,9,10,10,10,10]
 const rand = (items) => items[Math.floor(Math.random()*items.length)]
@@ -53,10 +55,13 @@ const playerWillHit = (cards, dealerCard) => {
 const playHand = (playerChips, betAmmount) => {
   const playerHand = [rand(deckCards), rand(deckCards)]
   const dealerHand = [rand(deckCards)]
-
   let multiplyer = 1
 
-  if (playerWillHit(playerHand, dealerHand[0]) === 'DOUBLE') {
+  if (playerWillHit(playerHand, dealerHand[0]) === 'SURRENDER') {
+    // console.log(playerHand, dealerHand)
+    // console.log('Surrender')
+    return playerChips - (betAmmount / 2)
+  } else if (playerWillHit(playerHand, dealerHand[0]) === 'DOUBLE') {
     playerHand.push(rand(deckCards))
     multiplyer = 2
   } else {
@@ -65,7 +70,6 @@ const playHand = (playerChips, betAmmount) => {
     }
   }
 
-
   while (dealerWillHit(dealerHand)){
     dealerHand.push(rand(deckCards))
   }
@@ -73,8 +77,8 @@ const playHand = (playerChips, betAmmount) => {
   const playerTotal = calcTotal(playerHand)
   const dealerTotal = calcTotal(dealerHand)
 
-  console.log(playerHand, dealerHand)
-  console.log(playerTotal, dealerTotal)
+  // console.log(playerHand, dealerHand)
+  // console.log(playerTotal, dealerTotal)
   
   let playerWon = false
   let playerTied = false
@@ -97,20 +101,20 @@ const playHand = (playerChips, betAmmount) => {
   }
 
   if(multiplyer === 2){
-    console.log('Double')
+    // console.log('Double')
   }
 
   if (isBlackjack){
-    console.log('Blackjack!')
+    // console.log('Blackjack!')
     return playerChips + (betAmmount * 1.5 * multiplyer)
   } else if (playerWon){
-    console.log('Win!')
+    // console.log('Win!')
     return playerChips + (betAmmount * multiplyer)
   } else if (playerTied) {
-    console.log('Push')
+    // console.log('Push')
     return playerChips
   } else {
-    console.log('Lose')
+    // console.log('Lose')
     return playerChips - (betAmmount * multiplyer)
   }
 
@@ -118,13 +122,12 @@ const playHand = (playerChips, betAmmount) => {
 
 const main = () => {
   let startingChips = 500
+  let bet = 1
   let chips = startingChips
   let max = chips
   let min = chips
-  let wins = 0
-  let total = 0
 
-  let maxHands = 1000
+  let maxHands = 1000000
   let count = maxHands
 
   // let goal = 100
@@ -132,15 +135,8 @@ const main = () => {
   // while (chips > 0 && chips <= startingChips + goal) {
   // while (chips > 0) {
   while (count > 0) {
-    console.log(chips)
-    const result = playHand(chips, 25)
-    if (result > chips){
-      wins++
-      total++
-    }
-    if (result < chips){
-      total++
-    }
+    // console.log(chips)
+    const result = playHand(chips, bet)
     chips = result
     if (chips > max){
       max = chips
@@ -158,7 +154,7 @@ const main = () => {
   console.log('end: ', chips)
   console.log('max: ', max)
   console.log('min: ', min)
-  console.log('edge: ', (((wins / total) * 2) - 1))
+  console.log('edge: ', ((chips - startingChips) / maxHands))
 }
 
 main()

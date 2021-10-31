@@ -185,25 +185,27 @@ const processHand = (card1, card2, dealerCard1) => {
 
   // console.log(softString, handTotal, dealerCard1, playerShouldHit)
 
-  if (isSoft) {
-    playerShouldHitSoft[handTotal][dealerCard1] = playerShouldDouble ? 'DOUBLE' : playerShouldHit
-  } else {
-    playerShouldHitHard[handTotal][dealerCard1] = playerShouldDouble ? 'DOUBLE' : playerShouldHit
-  }
-
   const correctMove = playerShouldDouble ? 'D' : (playerShouldHit ? 'H' : 'S')
   const incorrectMove = playerShouldHit ? 'S' : 'H'
   const correctOdds = playerShouldDouble ? doubleWinOdds : (playerShouldHit ? hitWinOdds : standWinOdds)
   const incorrectOdds = playerShouldHit ? standWinOdds : hitWinOdds
 
-  const shouldSurrender = correctOdds < 0.25
-  const moveOrSurrender = shouldSurrender ? 'R>' + correctMove : correctMove
+  // const shouldSurrender = correctOdds < 0.25
+  // const moveOrSurrender = shouldSurrender ? 'R>' + correctMove : correctMove
+  // const moveValue = shouldSurrender ? 'SURRENDER' : (playerShouldDouble ? 'DOUBLE' : playerShouldHit)
+  const moveValue = playerShouldDouble ? 'DOUBLE' : playerShouldHit
+
+  if (isSoft) {
+    playerShouldHitSoft[handTotal][dealerCard1] = moveValue
+  } else {
+    playerShouldHitHard[handTotal][dealerCard1] = moveValue
+  }
 
   if (!winOdds[softString + ': ' + handTotal]){
     winOdds[softString + ': ' + handTotal] = {}
   }
 
-  winOdds[softString + ': ' + handTotal][dealerCard1] = [moveOrSurrender, correctOdds, incorrectMove, incorrectOdds]
+  winOdds[softString + ': ' + handTotal][dealerCard1] = [correctMove, correctOdds, incorrectMove, incorrectOdds]
 }
 
 const main = () => {
@@ -219,10 +221,10 @@ const main = () => {
 
   console.log(sortObject(winOdds))
 
-  const allProbabilities = []
-  Object.values(winOdds).forEach(total => Object.values(total).forEach(decison => allProbabilities.push(decison[1])))
+  // const allProbabilities = []
+  // Object.values(winOdds).forEach(total => Object.values(total).forEach(decison => allProbabilities.push(decison[1])))
 
-  console.log('Theoretical Edge = ', (average(allProbabilities) - 0.5))
+  // console.log('Theoretical Edge = ', (average(allProbabilities) - 0.5))
 
   const output = {
     hard: playerShouldHitHard,
