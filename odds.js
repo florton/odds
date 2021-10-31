@@ -1,7 +1,4 @@
 const fs = require('fs')
-
-const standOdds = {}
-const hitOdds = {}
 const winOdds = {}
 
 const hands = [10,9,8,7,6,5,4,3,2,1]
@@ -195,9 +192,6 @@ const processHand = (card1, card2, dealerCard1) => {
   }
 
   winOdds[softString + ': ' + handTotal][dealerCard1] = [correctMove, correctOdds, incorrectMove, incorrectOdds]
-
-  // standOdds[card1 + ', ' + card2][dealerCard1] = standWinOrPushOdds
-  // hitOdds[card1 + ', ' + card2][dealerCard1] = hitWinOrPushOdds
 }
 
 const main = () => {
@@ -205,29 +199,18 @@ const main = () => {
 
   for (card1 of hands){
     for (card2 of hands){
-      // standOdds[card1 + ', ' + card2] = {}
-      // hitOdds[card1 + ', ' + card2] = {}
-      // winOdds[card1 + ', ' + card2] = {}
       for (dealerCard1 of hands){
         processHand(card1, card2, dealerCard1)
       }
     }
   }
 
-
   console.log(sortObject(winOdds))
 
   const allProbabilities = []
   Object.values(winOdds).forEach(total => Object.values(total).forEach(decison => allProbabilities.push(decison[1])))
 
-
-
   console.log('Theoretical Edge = ', (average(allProbabilities) - 0.5))
-
-  // console.log('Stand')
-  // console.log(standOdds)
-  // console.log('Hit')
-  // console.log(hitOdds)
 
   const output = {
     hard: playerShouldHitHard,

@@ -108,13 +108,18 @@ const main = () => {
   let startingChips = 500
   let chips = startingChips
   let max = chips
+  let min = chips
   let wins = 0
   let total = 0
+
+  let maxHands = 1000
+  let count = maxHands
 
   // let goal = 100
 
   // while (chips > 0 && chips <= startingChips + goal) {
-  while (chips > 0) {
+  // while (chips > 0) {
+  while (count > 0) {
     console.log(chips)
     const result = playHand(chips, 25)
     if (result > chips){
@@ -128,11 +133,19 @@ const main = () => {
     if (chips > max){
       max = chips
     }
+    if (chips < min){
+      min = chips
+    }
+    count--
   }
 
   console.log(chips)
 
+  console.log('hands: ', maxHands)
+  console.log('start: ', startingChips)
+  console.log('end: ', chips)
   console.log('max: ', max)
+  console.log('min: ', min)
   console.log('edge: ', (((wins / total) * 2) - 1))
 }
 
