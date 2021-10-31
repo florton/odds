@@ -54,9 +54,17 @@ const playHand = (playerChips, betAmmount) => {
   const playerHand = [rand(deckCards), rand(deckCards)]
   const dealerHand = [rand(deckCards)]
 
-  while (playerWillHit(playerHand, dealerHand[0])){
+  let multiplyer = 1
+
+  if (playerWillHit(playerHand, dealerHand[0]) === 'DOUBLE') {
     playerHand.push(rand(deckCards))
+    multiplyer = 2
+  } else {
+    while (playerWillHit(playerHand, dealerHand[0])){
+      playerHand.push(rand(deckCards))
+    }
   }
+
 
   while (dealerWillHit(dealerHand)){
     dealerHand.push(rand(deckCards))
@@ -88,18 +96,22 @@ const playHand = (playerChips, betAmmount) => {
     playerWon = false
   }
 
+  if(multiplyer === 2){
+    console.log('Double')
+  }
+
   if (isBlackjack){
     console.log('Blackjack!')
-    return playerChips + (betAmmount * 1.5)
+    return playerChips + (betAmmount * 1.5 * multiplyer)
   } else if (playerWon){
     console.log('Win!')
-    return playerChips + betAmmount
+    return playerChips + (betAmmount * multiplyer)
   } else if (playerTied) {
     console.log('Push')
     return playerChips
   } else {
     console.log('Lose')
-    return playerChips - betAmmount
+    return playerChips - (betAmmount * multiplyer)
   }
 
 }

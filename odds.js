@@ -137,6 +137,12 @@ const processPlayerHand = (card1, card2, dealerCard1) => {
   return hitOutcomes
 }
 
+const processPlayerDouble = (card1, card2) => {
+  const playerWillHit = () => false
+  const hitOutcomes = calcHandOutcomes([card1, card2], playerWillHit, true)
+  return hitOutcomes
+}
+
 const processDealerHand = () => {
   const dealerWillHit = (cards) => {
     const choice = calcTotal(cards) < 17
@@ -153,19 +159,22 @@ const processHand = (card1, card2, dealerCard1) => {
     dealerOutcomes[dealerCard1] = outcomes
   }
 
-  const playerOutcomes = processPlayerHand(card1, card2, dealerCard1)
+  const playerHitOutcomes = processPlayerHand(card1, card2, dealerCard1)
+  const playerDoubleOutcomes = processPlayerDouble(card1, card2)
 
   const handTotal = calcTotal([card1, card2])
 
   // console.log([card1, card2], dealerCard1)
-  const standWinOrPushOdds = calcOdds([handTotal], dealerOutcomes?.[dealerCard1])
-  const hitWinOrPushOdds = calcOdds(playerOutcomes, dealerOutcomes?.[dealerCard1])
+  const standWinOdds = calcOdds([handTotal], dealerOutcomes?.[dealerCard1])
+  const hitWinOdds = calcOdds(playerHitOutcomes, dealerOutcomes?.[dealerCard1])
+  const doubleWinOdds = calcOdds(playerDoubleOutcomes, dealerOutcomes?.[dealerCard1])
 
-  // console.log(standWinOrPushOdds, hitWinOrPushOdds)
+  // console.log(standWinOdds, hitWinOdds)
 
   const isSoft = handIsSoft([card1, card2])
   const softString = isSoft ? 'Soft' : 'Hard'
-  const playerShouldHit = hitWinOrPushOdds > standWinOrPushOdds
+  const playerShouldHit = hitWinOdds > standWinOdds
+  const playerShouldDouble = doubleWinOdds > standWinOdds && doubleWinOdds > 0.5
 
   if (!playerShouldHitSoft[handTotal]){
     playerShouldHitSoft[handTotal] = {}
@@ -177,15 +186,15 @@ const processHand = (card1, card2, dealerCard1) => {
   // console.log(softString, handTotal, dealerCard1, playerShouldHit)
 
   if (isSoft) {
-    playerShouldHitSoft[handTotal][dealerCard1] = playerShouldHit
+    playerShouldHitSoft[handTotal][dealerCard1] = playerShouldDouble ? 'DOUBLE' : playerShouldHit
   } else {
-    playerShouldHitHard[handTotal][dealerCard1] = playerShouldHit
+    playerShouldHitHard[handTotal][dealerCard1] = playerShouldDouble ? 'DOUBLE' : playerShouldHit
   }
 
-  const correctMove = playerShouldHit ? 'H' : 'S'
+  const correctMove = playerShouldDouble ? 'D' : (playerShouldHit ? 'H' : 'S')
   const incorrectMove = playerShouldHit ? 'S' : 'H'
-  const correctOdds = playerShouldHit ? hitWinOrPushOdds : standWinOrPushOdds
-  const incorrectOdds = playerShouldHit ? standWinOrPushOdds : hitWinOrPushOdds
+  const correctOdds = playerShouldDouble ? doubleWinOdds : (playerShouldHit ? hitWinOdds : standWinOdds)
+  const incorrectOdds = playerShouldHit ? standWinOdds : hitWinOdds
 
   if (!winOdds[softString + ': ' + handTotal]){
     winOdds[softString + ': ' + handTotal] = {}
