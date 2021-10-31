@@ -196,11 +196,14 @@ const processHand = (card1, card2, dealerCard1) => {
   const correctOdds = playerShouldDouble ? doubleWinOdds : (playerShouldHit ? hitWinOdds : standWinOdds)
   const incorrectOdds = playerShouldHit ? standWinOdds : hitWinOdds
 
+  const shouldSurrender = correctOdds < 0.25
+  const moveOrSurrender = shouldSurrender ? 'R>' + correctMove : correctMove
+
   if (!winOdds[softString + ': ' + handTotal]){
     winOdds[softString + ': ' + handTotal] = {}
   }
 
-  winOdds[softString + ': ' + handTotal][dealerCard1] = [correctMove, correctOdds, incorrectMove, incorrectOdds]
+  winOdds[softString + ': ' + handTotal][dealerCard1] = [moveOrSurrender, correctOdds, incorrectMove, incorrectOdds]
 }
 
 const main = () => {
