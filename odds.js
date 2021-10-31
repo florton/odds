@@ -12,18 +12,18 @@ const playerShouldHitSoft = {}
 // memoized hand outcomes
 const dealerOutcomes = {}
 
-// does not factor cards in dealer & players hands combined
-const NUMBER_OF_DECKS = 4
+// // does not factor cards in dealer & players hands combined
+// const NUMBER_OF_DECKS = 4
 
-const getDeck = (cards) => {
-  const counts = {}
+// const getDeck = (cards) => {
+//   const counts = {}
 
-  for (const num of cards) {
-    counts[num] = counts[num] ? counts[num] + 1 : 1;
-  }
+//   for (const num of cards) {
+//     counts[num] = counts[num] ? counts[num] + 1 : 1;
+//   }
 
-  return deckCards.filter(c => !counts[c] || counts[c] < NUMBER_OF_DECKS * 4)
-}
+//   return deckCards.filter(c => !counts[c] || counts[c] < NUMBER_OF_DECKS * 4)
+// }
 
 const calcTotal = (cards) => {
   const reducer = (previousValue, currentValue, currentIndex, array) => {
@@ -56,8 +56,8 @@ const handIsSoft = (cards) => {
 const calcHandOutcomes = (handCards, willHit, hitFirstTime = false, dealerCard = null) => {
   let handOutcomes = []
   if (handCards.length === 1 || hitFirstTime || willHit(handCards, dealerCard)){
-    const deck = getDeck(handCards)
-    for (nextCard of deck){
+    // const deck = getDeck(handCards)
+    for (nextCard of deckCards){
       handOutcomes = handOutcomes.concat(calcHandOutcomes([
         ...handCards,
         nextCard
@@ -220,7 +220,6 @@ const main = () => {
   const average = (array) => array.reduce((a, b) => a + b) / array.length;
 
   console.log('Theoretical Edge = ', (average(allProbabilities) - 0.5))
-
 
   // console.log('Stand')
   // console.log(standOdds)
