@@ -17,6 +17,9 @@ const dealerOutcomes = {}
 // // does not factor cards in dealer & players hands combined
 // const NUMBER_OF_DECKS = 4
 
+const sortObject = o => Object.keys(o).sort().reduce((r, k) => (r[k] = o[k], r), {})
+const average = (array) => array.reduce((a, b) => a + b) / array.length;
+
 // const getDeck = (cards) => {
 //   const counts = {}
 
@@ -60,14 +63,15 @@ const calcHandOutcomes = (handCards, willHit, hitFirstTime = false, dealerCard =
   if (handCards.length === 1 || hitFirstTime || willHit(handCards, dealerCard)){
     // const deck = getDeck(handCards)
     for (nextCard of deckCards){
-      handOutcomes = handOutcomes.concat(calcHandOutcomes([
+      const result = calcHandOutcomes([
         ...handCards,
         nextCard
       ], 
       willHit,
       false,
       dealerCard
-      ))
+      )
+      handOutcomes.push(result)
     }
   } else {
     const handTotal = calcTotal(handCards)
@@ -77,49 +81,41 @@ const calcHandOutcomes = (handCards, willHit, hitFirstTime = false, dealerCard =
   return handOutcomes
 }
 
+const compareOutcome = (playerTotal, dealerTotal) => {
+  let result = 0
+
+  if (playerTotal > 21){
+    result = 0
+  } else if (dealerTotal > 21){
+    result = 1
+  } else if (playerTotal === dealerTotal){
+    result = 0.5
+  } else if (playerTotal > dealerTotal){
+    result = 1
+  } else {
+    result = 0
+  }
+  
+  return result
+}
+
 const calcOdds = (playerOutcomes, dealerOutcomes) => {
-  // const countsP = {}
-
-  // for (const num of playerOutcomes) {
-  //   countsP[num] = countsP[num] ? countsP[num] + 1 : 1;
-  // }
-
-  // const countsD = {}
-
-  // for (const num of dealerOutcomes) {
-  //   countsD[num] = countsD[num] ? countsD[num] + 1 : 1;
-  // }
-
-  // console.log(countsP, countsD)
-
-  ////////// -----------------------------
-
-  let winCount = 0
-  let pushCount = 0
-  let loseCount = 0
+  const results = []
 
   for (playerTotal of playerOutcomes){
     for (dealerTotal of dealerOutcomes){
-      if (playerTotal > 21){
-        loseCount++
-      } else if (dealerTotal > 21){
-        winCount++
-      } else if (playerTotal === dealerTotal){
-        pushCount++
-      } else if (playerTotal > dealerTotal){
-        winCount++
+      if (!Array.isArray(playerTotal) && !Array.isArray(dealerTotal)){
+        results.push(compareOutcome(playerTotal, dealerTotal))
       } else {
-        loseCount++
+        results.push(calcOdds(
+          playerTotal.length ? playerTotal : [playerTotal],
+          dealerTotal.length ? dealerTotal : [dealerTotal],
+        ))
       }
     }
   }
 
-  // console.log(winCount, pushCount, loseCount)
-
-  const total = winCount + loseCount
-  // const total = winCount + pushCount + loseCount
-  return winCount / total
-  // return (winCount + pushCount) / total
+  return(average(results))
 }
 
 const processPlayerHand = (card1, card2, dealerCard1) => {
@@ -128,7 +124,10 @@ const processPlayerHand = (card1, card2, dealerCard1) => {
     const handTotal = calcTotal(cards)
     if (handTotal >= 21){
       return false
-    } else {
+    } else if (handTotal < 12) {
+      return true
+    }
+    else {
       const isSoft = handIsSoft(cards)
       if (isSoft){
         return playerShouldHitSoft[handTotal][dealerCard]
@@ -187,12 +186,15 @@ const processHand = (card1, card2, dealerCard1) => {
   }
 
   const correctMove = playerShouldHit ? 'H' : 'S'
+  const incorrectMove = playerShouldHit ? 'S' : 'H'
   const correctOdds = playerShouldHit ? hitWinOrPushOdds : standWinOrPushOdds
+  const incorrectOdds = playerShouldHit ? standWinOrPushOdds : hitWinOrPushOdds
+
   if (!winOdds[softString + ': ' + handTotal]){
     winOdds[softString + ': ' + handTotal] = {}
   }
 
-  winOdds[softString + ': ' + handTotal][dealerCard1] = [correctMove, correctOdds]
+  winOdds[softString + ': ' + handTotal][dealerCard1] = [correctMove, correctOdds, incorrectMove, incorrectOdds]
 
   // standOdds[card1 + ', ' + card2][dealerCard1] = standWinOrPushOdds
   // hitOdds[card1 + ', ' + card2][dealerCard1] = hitWinOrPushOdds
@@ -212,14 +214,13 @@ const main = () => {
     }
   }
 
-  const sortObject = o => Object.keys(o).sort().reduce((r, k) => (r[k] = o[k], r), {})
 
   console.log(sortObject(winOdds))
 
   const allProbabilities = []
   Object.values(winOdds).forEach(total => Object.values(total).forEach(decison => allProbabilities.push(decison[1])))
 
-  const average = (array) => array.reduce((a, b) => a + b) / array.length;
+
 
   console.log('Theoretical Edge = ', (average(allProbabilities) - 0.5))
 
