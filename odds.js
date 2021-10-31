@@ -61,7 +61,7 @@ const calcHandOutcomes = (handCards, willHit, hitFirstTime = false, isPlayer = f
   let handOutcomes = []
   if (handCards.length === 1 || hitFirstTime || willHit(handCards)){
     if (isPlayer){
-      console.log('Hit', handCards)
+      // console.log('Hit', handCards)
     }
     const deck = getDeck(handCards)
     for (nextCard of deck){
@@ -76,20 +76,20 @@ const calcHandOutcomes = (handCards, willHit, hitFirstTime = false, isPlayer = f
     }
   } else {
     if (isPlayer){
-      console.log('Stay', handCards)
+      // console.log('Stay', handCards)
     }
     const handTotal = calcTotal(handCards)
     handOutcomes.push(handTotal)
   }
-  
-  if (isPlayer){
-    const countsP = {}
 
-    for (const num of handOutcomes) {
-      countsP[num] = countsP[num] ? countsP[num] + 1 : 1;
-    }
+  if (isPlayer){
+    // const countsP = {}
+
+    // for (const num of handOutcomes) {
+    //   countsP[num] = countsP[num] ? countsP[num] + 1 : 1;
+    // }
   
-    console.log(countsP)
+    // console.log(countsP)
   }
 
   return handOutcomes
@@ -197,13 +197,20 @@ const processHand = (card1, card2, dealerCard1) => {
 
   // console.log(standWinOrPushOdds, hitWinOrPushOdds)
 
+  const isSoft = handIsSoft([card1, card2])
+  const softLetter = isSoft ? 'Soft' : 'Hard'
   const playerShouldHit = hitWinOrPushOdds > standWinOrPushOdds
 
   const correctMove = playerShouldHit ? 'H' : 'S'
   const correctOdds = playerShouldHit ? hitWinOrPushOdds : standWinOrPushOdds
-  winOdds[card1 + ', ' + card2][dealerCard1] = [correctMove, correctOdds]
+  if (!winOdds[softLetter + ': ' + handTotal]){
+    winOdds[softLetter + ': ' + handTotal] = {}
+  }
 
-  if (handIsSoft([card1, card2])) {
+  winOdds[softLetter + ': ' + handTotal][dealerCard1] = [correctMove, correctOdds]
+
+
+  if (isSoft) {
     playerShouldHitSoft[handTotal] = playerShouldHit
   } else {
     playerShouldHitHard[handTotal] = playerShouldHit
@@ -220,7 +227,7 @@ const main = () => {
     for (card2 of hands){
       // standOdds[card1 + ', ' + card2] = {}
       // hitOdds[card1 + ', ' + card2] = {}
-      winOdds[card1 + ', ' + card2] = {}
+      // winOdds[card1 + ', ' + card2] = {}
       playerOutcomes[card1] = {}
       playerOutcomes[card2] = {}
       for (dealerCard1 of hands){
@@ -229,7 +236,9 @@ const main = () => {
     }
   }
 
-  // console.log(winOdds)
+  const sortObject = o => Object.keys(o).sort().reduce((r, k) => (r[k] = o[k], r), {})
+
+  console.log(sortObject(winOdds))
 
   // console.log('Stand')
   // console.log(standOdds)
