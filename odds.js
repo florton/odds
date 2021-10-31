@@ -1,3 +1,5 @@
+const fs = require('fs')
+
 const standOdds = {}
 const hitOdds = {}
 const winOdds = {}
@@ -225,6 +227,21 @@ const main = () => {
   // console.log(standOdds)
   // console.log('Hit')
   // console.log(hitOdds)
+
+  const output = {
+    hard: playerShouldHitHard,
+    soft: playerShouldHitSoft
+  }
+
+  const jsonContent = JSON.stringify(output);
+  fs.writeFile("output.json", jsonContent, 'utf8', function (err) {
+    if (err) {
+        console.log("An error occured while writing JSON Object to File.");
+        return console.log(err);
+    }
+ 
+    console.log("JSON file has been saved.");
+  })
 }
 
 
