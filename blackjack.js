@@ -186,7 +186,10 @@ const randomItem = (array) => array[Math.floor((Math.random()*array.length))]
 
 const main = (mutationLimit = 100, movesCountA = 500000, movesCountB = 3000000) => {
   playerMoves = basic
-  const baseline = run()
+
+  console.log("Establishing baseline")
+  const baseline = run(10000000)
+  console.log("Baseline: ", baseline)
   let newBest = baseline
 
   const moves = [true, false, 'DOUBLE', 'SURENDER']
@@ -213,8 +216,8 @@ const main = (mutationLimit = 100, movesCountA = 500000, movesCountB = 3000000) 
 
         if (edge2 > newBest){
           nextGeneration = movesCopy
-          newBest = edge
-          console.log('New best:', edge)
+          newBest = edge2
+          console.log('New best:', edge2)
         }
       }      
     }
@@ -223,7 +226,7 @@ const main = (mutationLimit = 100, movesCountA = 500000, movesCountB = 3000000) 
   }
 
   const finalEdge = run(10000000)
-  saveFile(finalEdge, playerMoves)
+  saveFile(finalEdge + '|' + (new Date()).toISOString(), playerMoves)
 
   console.log('Starting edge: ' + baseline)
   console.log('Ending edge: ' + finalEdge)
