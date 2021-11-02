@@ -1,11 +1,22 @@
+const fs = require('fs')
+
 // const playerMoves = require('./output.json')
-const playerMoves = require('./outputS.json')
-// const playerMoves = require('./basic.json')
+// const playerMoves = require('./outputS.json')
+const basic = require('./basic.json')
+
+let playerMoves = null
 
 const deckCards = [1,2,3,4,5,6,7,8,9,10,10,10,10]
 const rand = (items) => items[Math.floor(Math.random()*items.length)]
 
+// memo
+const preCalcedTotals = {}
+
 const calcTotal = (cards) => {
+  if (preCalcedTotals[cards.toString()]){
+    return preCalcedTotals[cards.toString()]
+  }
+
   const reducer = (previousValue, currentValue, currentIndex, array) => {
     let nextValue = currentValue
     if (currentValue === 1 && currentIndex == array.length - 1) {
@@ -15,7 +26,10 @@ const calcTotal = (cards) => {
     }
     return previousValue + nextValue
   }
+
   const result = [...cards].sort().reverse().reduce(reducer)
+
+  preCalcedTotals[cards.toString()] = result
   return result
 }
 
@@ -120,15 +134,11 @@ const playHand = (playerChips, betAmmount) => {
 
 }
 
-const main = () => {
-  let startingChips = 500
-  let bet = 1
+const run = (handCount = 1000000, startingChips = 500, bet = 25) => {
   let chips = startingChips
-  let max = chips
-  let min = chips
-
-  let maxHands = 1000000
-  let count = maxHands
+  // let max = chips
+  // let min = chips
+  let count = handCount
 
   // let goal = 100
 
@@ -138,23 +148,86 @@ const main = () => {
     // console.log(chips)
     const result = playHand(chips, bet)
     chips = result
-    if (chips > max){
-      max = chips
-    }
-    if (chips < min){
-      min = chips
-    }
+    // if (chips > max){
+    //   max = chips
+    // }
+    // if (chips < min){
+    //   min = chips
+    // }
     count--
   }
 
-  console.log(chips)
+  // console.log(chips)
+  const edge = ((chips - startingChips) / bet)/ handCount
 
-  console.log('hands: ', maxHands)
-  console.log('start: ', startingChips)
-  console.log('end: ', chips)
-  console.log('max: ', max)
-  console.log('min: ', min)
-  console.log('edge: ', ((chips - startingChips) / maxHands))
+  // console.log('hands: ', handCount)
+  // console.log('start: ', startingChips)
+  // console.log('end: ', chips)
+  // console.log('max: ', max)
+  // console.log('min: ', min)
+  console.log('edge: ', edge)
+
+  return edge
+}
+
+const saveFile = (filename, strategy) => {
+  const jsonContent = JSON.stringify(strategy);
+  fs.writeFile('evolutions/' + filename + ".json", jsonContent, 'utf8', function (err) {
+    if (err) {
+        console.log("An error occured while writing JSON Object to File.");
+        return console.log(err);
+    }
+ 
+    console.log("JSON file has been saved.");
+  })
+}
+
+const randomItem = (array) => array[Math.floor((Math.random()*array.length))]
+
+const main = (mutationLimit = 100, movesCountA = 500000, movesCountB = 3000000) => {
+  playerMoves = basic
+  const baseline = run()
+  let newBest = baseline
+
+  const moves = [true, false, 'DOUBLE', 'SURENDER']
+
+  for (i=0; i<mutationLimit; i++) {
+    let currentGeneration = playerMoves
+    // pick random mutation
+    const rand1 = Math.random() < 0.5 ? 'hard' : 'soft'
+    const rand2 = randomItem(Object.keys(currentGeneration[rand1]))
+    const rand3 = randomItem(Object.keys(currentGeneration[rand1][rand2]))
+   
+    let nextGeneration = currentGeneration
+
+    for(ii=0; ii<moves.length; ii++){
+      const movesCopy = JSON.parse(JSON.stringify(currentGeneration))
+      console.log(rand1, rand2, rand3, movesCopy[rand1][rand2][rand3], '->', moves[ii])
+      movesCopy[rand1][rand2][rand3] = moves[ii]
+
+      // run simulation
+      let edge = run(movesCountA)
+      if (edge > newBest){
+        // edge must still be better after movesCountB hands for the mutation to pass
+        const edge2 = run(movesCountB)
+
+        if (edge2 > newBest){
+          nextGeneration = movesCopy
+          newBest = edge
+          console.log('New best:', edge)
+        }
+      }      
+    }
+    playerMoves = nextGeneration
+    console.log(i)
+  }
+
+  const finalEdge = run(10000000)
+  saveFile(finalEdge, playerMoves)
+
+  console.log('Starting edge: ' + baseline)
+  console.log('Ending edge: ' + finalEdge)
+
 }
 
 main()

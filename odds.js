@@ -26,8 +26,14 @@ const average = (array) => array.reduce((a, b) => a + b) / array.length;
 
 //   return deckCards.filter(c => !counts[c] || counts[c] < NUMBER_OF_DECKS * 4)
 // }
+// memo
+const preCalcedTotals = {}
 
 const calcTotal = (cards) => {
+  if (preCalcedTotals[cards.toString()]){
+    return preCalcedTotals[cards.toString()]
+  }
+  
   const reducer = (previousValue, currentValue, currentIndex, array) => {
     let nextValue = currentValue
     if (currentValue === 1 && currentIndex == array.length - 1) {
@@ -37,7 +43,10 @@ const calcTotal = (cards) => {
     }
     return previousValue + nextValue
   }
+
   const result = [...cards].sort().reverse().reduce(reducer)
+
+  preCalcedTotals[cards.toString()] = result
   return result
 }
 

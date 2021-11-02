@@ -208,7 +208,7 @@
   "soft": {
     "12": {
       "1": true,
-      "2": true,
+      "2": "DOUBLE",
       "3": true,
       "4": "DOUBLE",
       "5": "DOUBLE",
