@@ -226,11 +226,15 @@ const main = (mutationLimit = 100, movesCountA = 500000, movesCountB = 3000000) 
   }
 
   const finalEdge = run(10000000)
-  saveFile(finalEdge + '|' + (new Date()).toISOString(), playerMoves)
+  saveFile(finalEdge, playerMoves)
 
   console.log('Starting edge: ' + baseline)
   console.log('Ending edge: ' + finalEdge)
 
 }
 
-main()
+const totalCount = 100
+
+for (j=0;j<totalCount;j++){
+  main(100)
+}
