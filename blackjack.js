@@ -181,22 +181,19 @@ const saveFile = async (filename, strategy) => {
 
 const randomItem = (array) => array[Math.floor((Math.random() * array.length))]
 
-const baseline = null
+const baselineCount = 10000000
+const basicStrategy = JSON.parse(JSON.stringify(basic))
+console.log('Establishing baseline')
+const baselineEdge = run(basicStrategy, baselineCount)
+console.log('baseline: ', baselineEdge)
 
-const main = async (mutationLimit = 100, movesCountA = 500000, movesCountB = 3000000, baselineCount = 10000000) => {
-  const basicStrategy = JSON.parse(JSON.stringify(basic))
-
-  if (!baseline) {
-    console.log('Establishing baseline')
-    const baseline = run(basicStrategy, baselineCount)
-    console.log('Baseline: ', baseline)
-  }
-
-  let newBest = baseline
+const main = async (mutationLimit = 100, movesCountA = 500000, movesCountB = 1000000) => {
+  let newBest = baselineEdge
 
   const moves = [true, false, 'DOUBLE', 'SURENDER']
 
   let currentGeneration = basicStrategy
+  let changeWasMade = false
 
   for (let i = 0; i < mutationLimit; i++) {
     // pick random mutation
@@ -217,12 +214,13 @@ const main = async (mutationLimit = 100, movesCountA = 500000, movesCountB = 300
       movesCopy[rand1][rand2][rand3] = moves[ii]
 
       // run simulation
-      const edge = run(currentGeneration, movesCountA)
+      const edge = run(movesCopy, movesCountA)
       if (edge > newBest) {
         // edge must still be better after movesCountB hands for the mutation to pass
-        const edge2 = run(currentGeneration, movesCountB)
+        const edge2 = run(movesCopy, movesCountB)
 
         if (edge2 > newBest) {
+          changeWasMade = true
           nextGeneration = movesCopy
           newBest = edge2
           console.log('New best:', edge2)
@@ -231,20 +229,27 @@ const main = async (mutationLimit = 100, movesCountA = 500000, movesCountB = 300
     }
     currentGeneration = nextGeneration
     console.log(i)
+
+    if (i === mutationLimit - 1 && !changeWasMade) {
+      i = 0
+    }
   }
 
   const finalEdge = run(currentGeneration, baselineCount)
-  await saveFile(finalEdge, currentGeneration)
-
-  console.log('Starting edge: ' + baseline)
+  console.log('Starting edge: ' + baselineEdge)
   console.log('Ending edge: ' + finalEdge)
+
+  if (finalEdge > baselineEdge) {
+    await saveFile(finalEdge, currentGeneration)
+  }
 }
 
 const iterate = async () => {
-  const totalCount = 5
+  const totalCount = 1000
 
   for (let j = 0; j < totalCount; j++) {
-    await main(1)
+    // await main(100, 500000, 3000000)
+    await main(5, 1000000, 5000000)
   }
 }
 
