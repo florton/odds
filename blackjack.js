@@ -4,23 +4,21 @@ const fs = require('fs')
 // const playerMoves = require('./outputS.json')
 const basic = require('./basic.json')
 
-let playerMoves = null
-
-const deckCards = [1,2,3,4,5,6,7,8,9,10,10,10,10]
-const rand = (items) => items[Math.floor(Math.random()*items.length)]
+const deckCards = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10]
+const rand = (items) => items[Math.floor(Math.random() * items.length)]
 
 // memo
 const preCalcedTotals = {}
 
 const calcTotal = (cards) => {
-  if (preCalcedTotals[cards.toString()]){
+  if (preCalcedTotals[cards.toString()]) {
     return preCalcedTotals[cards.toString()]
   }
 
   const reducer = (previousValue, currentValue, currentIndex, array) => {
     let nextValue = currentValue
     if (currentValue === 1 && currentIndex == array.length - 1) {
-      if (previousValue + 11 <= 21){
+      if (previousValue + 11 <= 21) {
         nextValue = 11
       }
     }
@@ -35,7 +33,7 @@ const calcTotal = (cards) => {
 
 const handIsSoft = (cards) => {
   const numberOfAces = cards.filter(c => c == 1).length
-  if (numberOfAces > 0){
+  if (numberOfAces > 0) {
     const sum = (previousValue, currentValue) => previousValue + currentValue
 
     const handTotal = calcTotal(cards)
@@ -52,39 +50,39 @@ const dealerWillHit = (cards) => {
   return choice
 }
 
-const playerWillHit = (cards, dealerCard) => {
+const playerWillHit = (cards, dealerCard, strategy) => {
   const handTotal = calcTotal(cards)
-  if (handTotal >= 21){
+  if (handTotal >= 21) {
     return false
   } else {
     const isSoft = handIsSoft(cards)
-    if (isSoft){
-      return playerMoves.soft[handTotal][dealerCard]
+    if (isSoft) {
+      return strategy.soft[handTotal][dealerCard]
     } else {
-      return playerMoves.hard[handTotal][dealerCard]
+      return strategy.hard[handTotal][dealerCard]
     }
   }
 }
 
-const playHand = (playerChips, betAmmount) => {
+const playHand = (playerChips, betAmmount, strategy) => {
   const playerHand = [rand(deckCards), rand(deckCards)]
   const dealerHand = [rand(deckCards)]
   let multiplyer = 1
 
-  if (playerWillHit(playerHand, dealerHand[0]) === 'SURRENDER') {
+  if (playerWillHit(playerHand, dealerHand[0], strategy) === 'SURRENDER') {
     // console.log(playerHand, dealerHand)
     // console.log('Surrender')
     return playerChips - (betAmmount / 2)
-  } else if (playerWillHit(playerHand, dealerHand[0]) === 'DOUBLE') {
+  } else if (playerWillHit(playerHand, dealerHand[0], strategy) === 'DOUBLE') {
     playerHand.push(rand(deckCards))
     multiplyer = 2
   } else {
-    while (playerWillHit(playerHand, dealerHand[0])){
+    while (playerWillHit(playerHand, dealerHand[0], strategy)) {
       playerHand.push(rand(deckCards))
     }
   }
 
-  while (dealerWillHit(dealerHand)){
+  while (dealerWillHit(dealerHand)) {
     dealerHand.push(rand(deckCards))
   }
 
@@ -93,35 +91,35 @@ const playHand = (playerChips, betAmmount) => {
 
   // console.log(playerHand, dealerHand)
   // console.log(playerTotal, dealerTotal)
-  
+
   let playerWon = false
   let playerTied = false
   let isBlackjack = false
 
-  if (playerTotal === 21 && dealerTotal !== 21){
+  if (playerTotal === 21 && dealerTotal !== 21) {
     isBlackjack = true
   }
 
-  if (playerTotal > 21){
+  if (playerTotal > 21) {
     playerWon = false
-  } else if (dealerTotal > 21){
+  } else if (dealerTotal > 21) {
     playerWon = true
-  } else if (playerTotal === dealerTotal){
+  } else if (playerTotal === dealerTotal) {
     playerTied = false
-  } else if (playerTotal > dealerTotal){
+  } else if (playerTotal > dealerTotal) {
     playerWon = true
   } else {
     playerWon = false
   }
 
-  if(multiplyer === 2){
+  if (multiplyer === 2) {
     // console.log('Double')
   }
 
-  if (isBlackjack){
+  if (isBlackjack) {
     // console.log('Blackjack!')
     return playerChips + (betAmmount * 1.5 * multiplyer)
-  } else if (playerWon){
+  } else if (playerWon) {
     // console.log('Win!')
     return playerChips + (betAmmount * multiplyer)
   } else if (playerTied) {
@@ -131,10 +129,9 @@ const playHand = (playerChips, betAmmount) => {
     // console.log('Lose')
     return playerChips - (betAmmount * multiplyer)
   }
-
 }
 
-const run = (handCount = 1000000, startingChips = 500, bet = 25) => {
+const run = (strategy, handCount = 1000000, startingChips = 500, bet = 25) => {
   let chips = startingChips
   // let max = chips
   // let min = chips
@@ -146,7 +143,7 @@ const run = (handCount = 1000000, startingChips = 500, bet = 25) => {
   // while (chips > 0) {
   while (count > 0) {
     // console.log(chips)
-    const result = playHand(chips, bet)
+    const result = playHand(chips, bet, strategy)
     chips = result
     // if (chips > max){
     //   max = chips
@@ -158,7 +155,7 @@ const run = (handCount = 1000000, startingChips = 500, bet = 25) => {
   }
 
   // console.log(chips)
-  const edge = ((chips - startingChips) / bet)/ handCount
+  const edge = ((chips - startingChips) / bet) / handCount
 
   // console.log('hands: ', handCount)
   // console.log('start: ', startingChips)
@@ -170,71 +167,85 @@ const run = (handCount = 1000000, startingChips = 500, bet = 25) => {
   return edge
 }
 
-const saveFile = (filename, strategy) => {
-  const jsonContent = JSON.stringify(strategy);
-  fs.writeFile('evolutions/' + filename + ".json", jsonContent, 'utf8', function (err) {
+const saveFile = async (filename, strategy) => {
+  const jsonContent = JSON.stringify(strategy)
+  await fs.promises.writeFile('evolutions/' + filename + '.json', jsonContent, 'utf8', (err) => {
     if (err) {
-        console.log("An error occured while writing JSON Object to File.");
-        return console.log(err);
+      console.log('An error occured while writing JSON Object to File.')
+      return console.log(err)
     }
- 
-    console.log("JSON file has been saved.");
   })
+
+  console.log('JSON file has been saved.')
 }
 
-const randomItem = (array) => array[Math.floor((Math.random()*array.length))]
+const randomItem = (array) => array[Math.floor((Math.random() * array.length))]
 
-const main = (mutationLimit = 100, movesCountA = 500000, movesCountB = 3000000) => {
-  playerMoves = basic
+const baseline = null
 
-  console.log("Establishing baseline")
-  const baseline = run(10000000)
-  console.log("Baseline: ", baseline)
+const main = async (mutationLimit = 100, movesCountA = 500000, movesCountB = 3000000, baselineCount = 10000000) => {
+  const basicStrategy = JSON.parse(JSON.stringify(basic))
+
+  if (!baseline) {
+    console.log('Establishing baseline')
+    const baseline = run(basicStrategy, baselineCount)
+    console.log('Baseline: ', baseline)
+  }
+
   let newBest = baseline
 
   const moves = [true, false, 'DOUBLE', 'SURENDER']
 
-  for (i=0; i<mutationLimit; i++) {
-    let currentGeneration = playerMoves
+  let currentGeneration = basicStrategy
+
+  for (let i = 0; i < mutationLimit; i++) {
     // pick random mutation
     const rand1 = Math.random() < 0.5 ? 'hard' : 'soft'
     const rand2 = randomItem(Object.keys(currentGeneration[rand1]))
     const rand3 = randomItem(Object.keys(currentGeneration[rand1][rand2]))
-   
+
     let nextGeneration = currentGeneration
 
-    for(ii=0; ii<moves.length; ii++){
+    for (let ii = 0; ii < moves.length; ii++) {
+      if (currentGeneration[rand1][rand2][rand3] === moves[ii]) {
+        // dont try same move thats already set
+        continue
+      }
+
       const movesCopy = JSON.parse(JSON.stringify(currentGeneration))
       console.log(rand1, rand2, rand3, movesCopy[rand1][rand2][rand3], '->', moves[ii])
       movesCopy[rand1][rand2][rand3] = moves[ii]
 
       // run simulation
-      let edge = run(movesCountA)
-      if (edge > newBest){
+      const edge = run(currentGeneration, movesCountA)
+      if (edge > newBest) {
         // edge must still be better after movesCountB hands for the mutation to pass
-        const edge2 = run(movesCountB)
+        const edge2 = run(currentGeneration, movesCountB)
 
-        if (edge2 > newBest){
+        if (edge2 > newBest) {
           nextGeneration = movesCopy
           newBest = edge2
           console.log('New best:', edge2)
         }
-      }      
+      }
     }
-    playerMoves = nextGeneration
+    currentGeneration = nextGeneration
     console.log(i)
   }
 
-  const finalEdge = run(10000000)
-  saveFile(finalEdge, playerMoves)
+  const finalEdge = run(currentGeneration, baselineCount)
+  await saveFile(finalEdge, currentGeneration)
 
   console.log('Starting edge: ' + baseline)
   console.log('Ending edge: ' + finalEdge)
-
 }
 
-const totalCount = 100
+const iterate = async () => {
+  const totalCount = 5
 
-for (j=0;j<totalCount;j++){
-  main(100)
+  for (let j = 0; j < totalCount; j++) {
+    await main(1)
+  }
 }
+
+iterate()
