@@ -64,10 +64,20 @@ const playerWillHit = (cards, dealerCard, strategy) => {
   }
 }
 
-const playHand = (playerChips, betAmmount, strategy) => {
-  const playerHand = [rand(deckCards), rand(deckCards)]
+const playHand = (playerChips, betAmmount, strategy, splitCard = null) => {
+  const playerHand = [splitCard || rand(deckCards), rand(deckCards)]
   const dealerHand = [rand(deckCards)]
   let multiplyer = 1
+
+  const allowSplits = true
+  if (allowSplits && playerHand[0] === playerHand[1]) {
+    if (strategy.splits[playerHand[0]] === 'SPLIT') {
+      return playHand(
+        playHand(playerChips, betAmmount, strategy, playerHand[0]),
+        betAmmount, strategy, playerHand[0]
+      )
+    }
+  }
 
   if (playerWillHit(playerHand, dealerHand[0], strategy) === 'SURRENDER') {
     // console.log(playerHand, dealerHand)
