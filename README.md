@@ -10,3 +10,5 @@ And an attempt to use an evolutionary algoritm to improve (too slow to be produc
 
 `node blackjack.js` to run blackjack simulation to calculate strategy edge (basic strategy by default,but you can change the import) (to run evolutionary algorithm to attempt to improve on it, uncomment last line `
 // iterate()`)
+
+`node deal.js` to run monty hall problem simulation
