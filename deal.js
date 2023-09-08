@@ -10,8 +10,8 @@ const keepChoice = (c, a) => {
 
 const changeChoice = (c, a) => {
   r = a.findIndex(x => !x.value && x.id !== c.id)
-  b = a.filter((x, i) => i !== r)
-  n = b.find(x => x.id !== c.id)
+  b = a.filter((x, i) => i !== r && x.id !== c.id)
+  n = b[Math.floor(Math.random()*b.length)]
   return check(n)
 }
 
@@ -34,6 +34,7 @@ const run = () => {
     i++
   }
 
+  console.log("Total Iterations:", numRuns)
   console.log("Keep wins:", keepWins)
   console.log("Win percent:", keepWins / numRuns)
   console.log("Change wins:", changeWins)
