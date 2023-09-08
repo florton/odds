@@ -11,8 +11,7 @@ const keepChoice = (c, a) => {
 const changeChoice = (c, a) => {
   r = a.findIndex(x => !x.value && x.id !== c.id)
   b = a.filter((x, i) => i !== r && x.id !== c.id)
-  n = b[Math.floor(Math.random()*b.length)]
-  return check(n)
+  return check(b[0])
 }
 
 const run = () => {
