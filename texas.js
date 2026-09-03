@@ -116,7 +116,8 @@ function getHandRank(cards) {
   let bestValue = 0;
   let name = '';
 
-  for (const combo of combinations(cards, 5)) {
+  const comboSize = cards.length === 2 ? 2 : 5;
+  for (const combo of combinations(cards, comboSize)) {
     const values = combo.map(cardValue).sort((a, b) => b - a);
     const ranksCount = countRanks(combo);
     const suitsCount = countSuits(combo);
@@ -131,6 +132,7 @@ function getHandRank(cards) {
         bestRank = 9;
         bestValue = 12;
         name = 'Royal Flush';
+        continue;
       }
     }
     // Straight Flush
@@ -139,6 +141,7 @@ function getHandRank(cards) {
         bestRank = 8;
         bestValue = straightHigh;
         name = 'Straight Flush';
+        continue;
       }
     }
     // Four of a Kind
@@ -148,6 +151,7 @@ function getHandRank(cards) {
         bestRank = 7;
         bestValue = quadRank;
         name = 'Four of a Kind';
+        continue;
       }
     }
     // Full House
@@ -157,6 +161,7 @@ function getHandRank(cards) {
         bestRank = 6;
         bestValue = tripleRank;
         name = 'Full House';
+        continue;
       }
     }
     // Flush
@@ -165,6 +170,7 @@ function getHandRank(cards) {
         bestRank = 5;
         bestValue = values[0];
         name = 'Flush';
+        continue;
       }
     }
     // Straight
@@ -173,6 +179,7 @@ function getHandRank(cards) {
         bestRank = 4;
         bestValue = straightHigh;
         name = 'Straight';
+        continue;
       }
     }
     // Three of a Kind
@@ -182,6 +189,7 @@ function getHandRank(cards) {
         bestRank = 3;
         bestValue = tripleRank;
         name = 'Three of a Kind';
+        continue;
       }
     }
     // Two Pair
@@ -192,6 +200,7 @@ function getHandRank(cards) {
         bestRank = 2;
         bestValue = highPair;
         name = 'Two Pair';
+        continue;
       }
     }
     // One Pair
@@ -200,13 +209,17 @@ function getHandRank(cards) {
         bestRank = 1;
         bestValue = pairs[0];
         name = 'One Pair';
+        continue;
       }
     }
     // High Card
-    if (0 > bestRank || (0 === bestRank && values[0] > bestValue)) {
-      bestRank = 0;
+    // Adjust bestRank to be fractional between 0-1 by card rank (highest card value / 12)
+    const fractionalRank = values[0] / 12;
+    if (fractionalRank > bestRank || (fractionalRank === bestRank && values[0] > bestValue)) {
+      bestRank = fractionalRank.toPrecision(2);
       bestValue = values[0];
       name = 'High Card';
+      continue;
     }
   }
   return [bestRank, bestValue, name];
@@ -214,22 +227,97 @@ function getHandRank(cards) {
 
 function getHandValue(hand, community) {
   const allCards = hand.concat(community.flop, community.turn, community.river);
-  return getHandRank(allCards);
+  return getHandRank(allCards.filter(card => card !== null));
 }
 
-// Simulate betting round (everyone bets 100 for demo)
-function bettingRound(roundName) {
+// Simulate betting round with call, raise, or fold logic
+function bettingRound(roundName, hands, communityCards) {
   console.log(`--- ${roundName} Betting Round ---`);
-  for (let i = 0; i < playerNames.length; i++) {
-    const bet = 100;
-    if (chips[i] >= bet) {
-      chips[i] -= bet;
-      bets[i] += bet;
-      pot.total += bet;
+  let activePlayers = [0, 1, 2, 3];
+  let currentBet = 0;
+  let roundBets = [0, 0, 0, 0];
+  let folded = [false, false, false, false];
+  let actionTaken = true;
+
+  while (actionTaken) {
+    actionTaken = false;
+    for (let i = 0; i < playerNames.length; i++) {
+      if (folded[i]) continue;
+      // Evaluate hand strength
+      const [rank, value] = getHandValue(hands[i], communityCards);
+
+      // Decide action based on expected value and current bet
+      let action;
+      // Calculate expected value: rank normalized (0-1), plus high card bonus
+      let expectedValue = Number(rank) / 9 + value / 12;
+
+      // Track if player has raised this round
+      if (!bettingRound.hasRaised) bettingRound.hasRaised = [false, false, false, false];
+
+      // Skip betting if player has already folded
+      if (folded[i]) {
+        continue;
+      }
+
+      // Pre-Flop: only call/raise with above-average hands, otherwise fold if bet is high
+      if (roundName === 'Pre-Flop') {
+        if (expectedValue < 0.35 && currentBet > 0) {
+          action = 'fold';
+        } else if (
+          expectedValue > 0.6 &&
+          chips[i] > currentBet - roundBets[i] + 50 &&
+          !bettingRound.hasRaised[i]
+        ) {
+          action = 'raise';
+          bettingRound.hasRaised[i] = true;
+        } else {
+          action = 'call';
+        }
+      } else {
+        // Post-Flop/Turn/River: require much stronger hands to call/raise
+        if (expectedValue < 0.7 && currentBet > 0) {
+          action = 'fold';
+        } else if (
+          expectedValue > 0.85 &&
+          chips[i] > currentBet - roundBets[i] + 50 &&
+          !bettingRound.hasRaised[i]
+        ) {
+          action = 'raise';
+          bettingRound.hasRaised[i] = true;
+        } else {
+          action = 'call';
+        }
+      }
+
+      if (action === 'fold') {
+        folded[i] = true;
+        activePlayers = activePlayers.filter(idx => idx !== i);
+        console.log(`${playerNames[i]} folds.`);
+        actionTaken = true;
+      } else if (action === 'raise') {
+        let raiseAmount = currentBet + 50;
+        let bet = Math.min(raiseAmount - roundBets[i], chips[i]);
+        chips[i] -= bet;
+        roundBets[i] += bet;
+        bets[i] += bet;
+        pot.total += bet;
+        currentBet = roundBets[i];
+        console.log(`${playerNames[i]} raises to ${currentBet} (hand: ${rank}, value: ${value})`);
+        actionTaken = true;
+      } else if (action === 'call') {
+        let callAmount = currentBet - roundBets[i];
+        let bet = Math.min(callAmount, chips[i]);
+        chips[i] -= bet;
+        roundBets[i] += bet;
+        bets[i] += bet;
+        pot.total += bet;
+        console.log(`${playerNames[i]} calls ${currentBet} (hand: ${rank}, value: ${value})`);
+      }
     }
   }
   console.log('Bets:', bets);
   console.log('Pot:', pot.total);
+  console.log('Folded:', folded);
 }
 
 // Showdown and payout
@@ -266,25 +354,25 @@ function startGame() {
   console.log('Player Hands:', hands.map((hand, idx) => ({ name: playerNames[idx], ...hand })));
 
   // Pre-flop betting
-  bettingRound('Pre-Flop');
+  bettingRound('Pre-Flop', hands, communityCards);
 
   // Flop
   deck.pop(); // burn
   communityCards.flop = [deck.pop(), deck.pop(), deck.pop()];
   console.log('Flop:', communityCards.flop);
-  bettingRound('Flop');
+  bettingRound('Flop', hands, communityCards);
 
   // Turn
   deck.pop(); // burn
   communityCards.turn = deck.pop();
   console.log('Turn:', communityCards.turn);
-  bettingRound('Turn');
+  bettingRound('Turn', hands, communityCards);
 
   // River
   deck.pop(); // burn
   communityCards.river = deck.pop();
   console.log('River:', communityCards.river);
-  bettingRound('River');
+  bettingRound('River', hands, communityCards);
 
   // Showdown
   showdown(hands, communityCards);
