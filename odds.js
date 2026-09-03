@@ -151,13 +151,31 @@ const processPlayerDouble = (card1, card2) => {
   return hitOutcomes
 }
 
+// A dealer natural needs the up card and the hole card to make 21 together.
+const wouldMakeNatural = (upCard, holeCard) =>
+  (upCard === 1 && holeCard === 10) || (upCard === 10 && holeCard === 1)
+
+// The dealer peeks, so a natural is settled before the player is asked for a
+// decision. By the time stand/hit/double/surrender is live, the dealer is
+// already known not to have one, and averaging over the unconditioned second
+// card leaves those automatic losses in the tree. That drags stand, hit and
+// double down together -- against a dealer ace it is 4 of the 13 branches --
+// while surrender pays a flat -0.5 no matter what the dealer holds. So the
+// drag moves every rival below the one option it cannot touch, and surrender
+// wins cells it has no business winning.
+//
+// calcHandOutcomes expands the single known card over every possible second
+// card, so the top level of what it returns is one branch per second card.
+// Dropping the branches that would have made 21 conditions the whole tree on
+// "no dealer natural", and the survivors remain equally likely to each other,
+// which is the uniform weighting calcOdds already assumes.
 const processDealerHand = (dealerCard1) => {
   const dealerWillHit = (cards) => {
     const choice = calcTotal(cards) < 17
     return choice
   }
   const dealerOutcomes = calcHandOutcomes([dealerCard1], dealerWillHit)
-  return dealerOutcomes
+  return dealerOutcomes.filter((_, i) => !wouldMakeNatural(dealerCard1, deckCards[i]))
 }
 
 const processHand = (card1, card2, dealerCard1) => {
