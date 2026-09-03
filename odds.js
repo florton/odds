@@ -151,13 +151,31 @@ const processPlayerDouble = (card1, card2) => {
   return hitOutcomes
 }
 
+// A dealer natural needs the up card and the hole card to make 21 together.
+const wouldMakeNatural = (upCard, holeCard) =>
+  (upCard === 1 && holeCard === 10) || (upCard === 10 && holeCard === 1)
+
+// The dealer peeks, so a natural is settled before the player is asked for a
+// decision. By the time stand/hit/double/surrender is live, the dealer is
+// already known not to have one, and averaging over the unconditioned second
+// card leaves those automatic losses in the tree. That drags stand, hit and
+// double down together -- against a dealer ace it is 4 of the 13 branches --
+// while surrender pays a flat -0.5 no matter what the dealer holds. So the
+// drag moves every rival below the one option it cannot touch, and surrender
+// wins cells it has no business winning.
+//
+// calcHandOutcomes expands the single known card over every possible second
+// card, so the top level of what it returns is one branch per second card.
+// Dropping the branches that would have made 21 conditions the whole tree on
+// "no dealer natural", and the survivors remain equally likely to each other,
+// which is the uniform weighting calcOdds already assumes.
 const processDealerHand = (dealerCard1) => {
   const dealerWillHit = (cards) => {
     const choice = calcTotal(cards) < 17
     return choice
   }
   const dealerOutcomes = calcHandOutcomes([dealerCard1], dealerWillHit)
-  return dealerOutcomes
+  return dealerOutcomes.filter((_, i) => !wouldMakeNatural(dealerCard1, deckCards[i]))
 }
 
 const processHand = (card1, card2, dealerCard1) => {
@@ -181,8 +199,22 @@ const processHand = (card1, card2, dealerCard1) => {
 
   const isSoft = handIsSoft([card1, card2])
   const softString = isSoft ? 'Soft' : 'Hard'
-  const playerShouldHit = hitWinOdds > standWinOdds
-  const playerShouldDouble = doubleWinOdds > standWinOdds && doubleWinOdds > 0.5
+
+  // calcOdds scores a win 1, a push 0.5 and a loss 0, so its result `s` is not
+  // money. Converting is exact, pushes included: EV = 2s - 1, in bet units.
+  // Every decision below has to be made on that scale, because the payouts
+  // differ per action -- doubling stakes two units, surrender forfeits half of
+  // one -- and those factors are invisible in `s`.
+  const standEV = 2 * standWinOdds - 1
+  const hitEV = 2 * hitWinOdds - 1
+  const doubleEV = 2 * (2 * doubleWinOdds - 1)
+
+  const playerShouldHit = hitEV > standEV
+  const playerShouldDouble = doubleEV > Math.max(standEV, hitEV)
+
+  // Surrender pays a flat -0.5, so it wins only when every line you could
+  // actually play is worth less than that.
+  const shouldSurrender = Math.max(standEV, hitEV, doubleEV) < -0.5
 
   if (!playerShouldHitSoft[handTotal]) {
     playerShouldHitSoft[handTotal] = {}
@@ -193,15 +225,18 @@ const processHand = (card1, card2, dealerCard1) => {
 
   // console.log(softString, handTotal, dealerCard1, playerShouldHit)
 
-  const correctMove = playerShouldDouble ? 'D' : (playerShouldHit ? 'H' : 'S')
+  const playedMove = playerShouldDouble ? 'D' : (playerShouldHit ? 'H' : 'S')
+  const correctMove = shouldSurrender ? 'R>' + playedMove : playedMove
   const incorrectMove = playerShouldHit ? 'S' : 'H'
-  const correctOdds = playerShouldDouble ? doubleWinOdds : (playerShouldHit ? hitWinOdds : standWinOdds)
-  const incorrectOdds = playerShouldHit ? standWinOdds : hitWinOdds
+  // Reported in EV now, so the numbers are comparable across actions.
+  const correctOdds = shouldSurrender
+    ? -0.5
+    : (playerShouldDouble ? doubleEV : (playerShouldHit ? hitEV : standEV))
+  const incorrectOdds = playerShouldHit ? standEV : hitEV
 
-  // const shouldSurrender = correctOdds < 0.25
-  // const moveOrSurrender = shouldSurrender ? 'R>' + correctMove : correctMove
-  // const moveValue = shouldSurrender ? 'SURRENDER' : (playerShouldDouble ? 'DOUBLE' : playerShouldHit)
-  const moveValue = playerShouldDouble ? 'DOUBLE' : playerShouldHit
+  const moveValue = shouldSurrender
+    ? 'SURRENDER'
+    : (playerShouldDouble ? 'DOUBLE' : playerShouldHit)
 
   if (isSoft) {
     playerShouldHitSoft[handTotal][dealerCard1] = moveValue
