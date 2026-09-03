@@ -181,8 +181,22 @@ const processHand = (card1, card2, dealerCard1) => {
 
   const isSoft = handIsSoft([card1, card2])
   const softString = isSoft ? 'Soft' : 'Hard'
-  const playerShouldHit = hitWinOdds > standWinOdds
-  const playerShouldDouble = doubleWinOdds > standWinOdds && doubleWinOdds > 0.5
+
+  // calcOdds scores a win 1, a push 0.5 and a loss 0, so its result `s` is not
+  // money. Converting is exact, pushes included: EV = 2s - 1, in bet units.
+  // Every decision below has to be made on that scale, because the payouts
+  // differ per action -- doubling stakes two units, surrender forfeits half of
+  // one -- and those factors are invisible in `s`.
+  const standEV = 2 * standWinOdds - 1
+  const hitEV = 2 * hitWinOdds - 1
+  const doubleEV = 2 * (2 * doubleWinOdds - 1)
+
+  const playerShouldHit = hitEV > standEV
+  const playerShouldDouble = doubleEV > Math.max(standEV, hitEV)
+
+  // Surrender pays a flat -0.5, so it wins only when every line you could
+  // actually play is worth less than that.
+  const shouldSurrender = Math.max(standEV, hitEV, doubleEV) < -0.5
 
   if (!playerShouldHitSoft[handTotal]) {
     playerShouldHitSoft[handTotal] = {}
@@ -193,15 +207,18 @@ const processHand = (card1, card2, dealerCard1) => {
 
   // console.log(softString, handTotal, dealerCard1, playerShouldHit)
 
-  const correctMove = playerShouldDouble ? 'D' : (playerShouldHit ? 'H' : 'S')
+  const playedMove = playerShouldDouble ? 'D' : (playerShouldHit ? 'H' : 'S')
+  const correctMove = shouldSurrender ? 'R>' + playedMove : playedMove
   const incorrectMove = playerShouldHit ? 'S' : 'H'
-  const correctOdds = playerShouldDouble ? doubleWinOdds : (playerShouldHit ? hitWinOdds : standWinOdds)
-  const incorrectOdds = playerShouldHit ? standWinOdds : hitWinOdds
+  // Reported in EV now, so the numbers are comparable across actions.
+  const correctOdds = shouldSurrender
+    ? -0.5
+    : (playerShouldDouble ? doubleEV : (playerShouldHit ? hitEV : standEV))
+  const incorrectOdds = playerShouldHit ? standEV : hitEV
 
-  // const shouldSurrender = correctOdds < 0.25
-  // const moveOrSurrender = shouldSurrender ? 'R>' + correctMove : correctMove
-  // const moveValue = shouldSurrender ? 'SURRENDER' : (playerShouldDouble ? 'DOUBLE' : playerShouldHit)
-  const moveValue = playerShouldDouble ? 'DOUBLE' : playerShouldHit
+  const moveValue = shouldSurrender
+    ? 'SURRENDER'
+    : (playerShouldDouble ? 'DOUBLE' : playerShouldHit)
 
   if (isSoft) {
     playerShouldHitSoft[handTotal][dealerCard1] = moveValue

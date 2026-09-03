@@ -1,8 +1,9 @@
 const fs = require('fs')
 
-// const playerMoves = require('./output.json')
-// const playerMoves = require('./outputS.json')
-const basic = require('./basic.json')
+// Which table to grade: `node blackjack.js` uses the real published basic
+// strategy; `node blackjack.js output.json` grades a table solved by odds.js.
+const strategyFile = process.argv[2] || 'basic.json'
+const basic = require('./' + strategyFile.replace(/^\.\//, ''))
 
 const deckCards = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10]
 const rand = (items) => items[Math.floor(Math.random() * items.length)]
@@ -66,16 +67,33 @@ const playerWillHit = (cards, dealerCard, strategy) => {
 
 const playHand = (playerChips, betAmmount, strategy, splitCard = null) => {
   const playerHand = [splitCard || rand(deckCards), rand(deckCards)]
-  const dealerHand = [rand(deckCards)]
+  const dealerHand = [rand(deckCards), rand(deckCards)]
   let multiplyer = 1
 
   const allowSplits = true
   if (allowSplits && playerHand[0] === playerHand[1]) {
-    if (strategy.splits[playerHand[0]] === 'SPLIT') {
+    // odds.js solves hard/soft only, so a generated table has no splits map.
+    // Treat that as "never split" rather than throwing, so any solved table
+    // can actually be graded here.
+    if (strategy.splits && strategy.splits[playerHand[0]] === 'SPLIT') {
       return playHand(
         playHand(playerChips, betAmmount, strategy, playerHand[0]),
         betAmmount, strategy, playerHand[0]
       )
+    }
+  }
+
+  // Naturals settle immediately, before any surrender/double/hit decision.
+  const playerNatural = !splitCard && calcTotal(playerHand) === 21
+  const dealerNatural = calcTotal(dealerHand) === 21
+
+  if (playerNatural || dealerNatural) {
+    if (playerNatural && dealerNatural) {
+      return playerChips
+    } else if (playerNatural) {
+      return playerChips + (betAmmount * 1.5)
+    } else {
+      return playerChips - betAmmount
     }
   }
 
@@ -104,18 +122,13 @@ const playHand = (playerChips, betAmmount, strategy, splitCard = null) => {
 
   let playerWon = false
   let playerTied = false
-  let isBlackjack = false
-
-  if (playerTotal === 21 && dealerTotal !== 21) {
-    isBlackjack = true
-  }
 
   if (playerTotal > 21) {
     playerWon = false
   } else if (dealerTotal > 21) {
     playerWon = true
   } else if (playerTotal === dealerTotal) {
-    playerTied = false
+    playerTied = true
   } else if (playerTotal > dealerTotal) {
     playerWon = true
   } else {
@@ -126,10 +139,7 @@ const playHand = (playerChips, betAmmount, strategy, splitCard = null) => {
     // console.log('Double')
   }
 
-  if (isBlackjack) {
-    // console.log('Blackjack!')
-    return playerChips + (betAmmount * 1.5 * multiplyer)
-  } else if (playerWon) {
+  if (playerWon) {
     // console.log('Win!')
     return playerChips + (betAmmount * multiplyer)
   } else if (playerTied) {
