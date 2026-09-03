@@ -5,8 +5,71 @@ const fs = require('fs')
 const strategyFile = process.argv[2] || 'basic.json'
 const basic = require('./' + strategyFile.replace(/^\.\//, ''))
 
-const deckCards = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10]
-const rand = (items) => items[Math.floor(Math.random() * items.length)]
+// ---------------------------------------------------------------- the shoe
+//
+// Cards are dealt from a real shoe rather than drawn with replacement, so the
+// deck depletes as it is played. That matters: with replacement every hand
+// comes from an identical deck, which makes counting impossible by
+// construction and leaves no room for composition-dependent play.
+//
+// A batch shuffler with a cut card is modelled, not a continuous shuffler --
+// a CSM returns cards after every round and would put us back at the
+// with-replacement case. PENETRATION is how deep the shoe is played before
+// the cut card appears; it is the single biggest lever on what counting is
+// worth, so it is a knob.
+
+// node blackjack.js [strategy] [decks] [penetration]
+//   node blackjack.js basic.json 6 0.75    six decks, cut 75% deep
+//   node blackjack.js basic.json 1 0.5     single deck, half dealt
+const NUM_DECKS = Number(process.argv[3]) || 6
+const PENETRATION = Number(process.argv[4]) || 0.75
+
+// One deck: four suits of each rank, tens and all three face cards worth 10.
+const rankValues = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10]
+
+const buildShoe = (numDecks) => {
+  const cards = []
+  for (let d = 0; d < numDecks; d++) {
+    for (let suit = 0; suit < 4; suit++) {
+      for (const value of rankValues) {
+        cards.push(value)
+      }
+    }
+  }
+  return cards
+}
+
+const shuffleShoe = (cards) => {
+  for (let i = cards.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    const swap = cards[i]
+    cards[i] = cards[j]
+    cards[j] = swap
+  }
+  return cards
+}
+
+let shoe = shuffleShoe(buildShoe(NUM_DECKS))
+let dealIndex = 0
+let cutIndex = Math.floor(shoe.length * PENETRATION)
+
+const reshuffle = () => {
+  shoe = shuffleShoe(buildShoe(NUM_DECKS))
+  dealIndex = 0
+  cutIndex = Math.floor(shoe.length * PENETRATION)
+}
+
+// The cut card ends the shoe at the end of the round it appears in, never
+// mid-hand, so this is checked between hands.
+const cutCardReached = () => dealIndex >= cutIndex
+
+const draw = () => {
+  // Only reachable if a single round burns through the tail of the shoe.
+  if (dealIndex >= shoe.length) {
+    reshuffle()
+  }
+  return shoe[dealIndex++]
+}
 
 // memo
 const preCalcedTotals = {}
@@ -66,8 +129,9 @@ const playerWillHit = (cards, dealerCard, strategy) => {
 }
 
 const playHand = (playerChips, betAmmount, strategy, splitCard = null) => {
-  const playerHand = [splitCard || rand(deckCards), rand(deckCards)]
-  const dealerHand = [rand(deckCards), rand(deckCards)]
+  // A split hand keeps one card of the pair, so only its partner is drawn.
+  const playerHand = [splitCard || draw(), draw()]
+  const dealerHand = [draw(), draw()]
   let multiplyer = 1
 
   const allowSplits = true
@@ -102,16 +166,16 @@ const playHand = (playerChips, betAmmount, strategy, splitCard = null) => {
     // console.log('Surrender')
     return playerChips - (betAmmount / 2)
   } else if (playerWillHit(playerHand, dealerHand[0], strategy) === 'DOUBLE') {
-    playerHand.push(rand(deckCards))
+    playerHand.push(draw())
     multiplyer = 2
   } else {
     while (playerWillHit(playerHand, dealerHand[0], strategy)) {
-      playerHand.push(rand(deckCards))
+      playerHand.push(draw())
     }
   }
 
   while (dealerWillHit(dealerHand)) {
-    dealerHand.push(rand(deckCards))
+    dealerHand.push(draw())
   }
 
   const playerTotal = calcTotal(playerHand)
@@ -163,6 +227,10 @@ const run = (strategy, handCount = 1000000, startingChips = 500, bet = 25) => {
   // while (chips > 0) {
   while (count > 0) {
     // console.log(chips)
+    // Between rounds only: a shoe is never reshuffled mid-hand.
+    if (cutCardReached()) {
+      reshuffle()
+    }
     const result = playHand(chips, bet, strategy)
     chips = result
     // if (chips > max){
@@ -203,6 +271,7 @@ const randomItem = (array) => array[Math.floor((Math.random() * array.length))]
 
 const baselineCount = 10000000
 const basicStrategy = JSON.parse(JSON.stringify(basic))
+console.log('Shoe: ' + NUM_DECKS + ' decks, cut at ' + Math.round(PENETRATION * 100) + '%')
 console.log('Establishing baseline')
 const baselineEdge = run(basicStrategy, baselineCount)
 console.log('baseline: ', baselineEdge)

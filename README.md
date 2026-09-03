@@ -8,6 +8,7 @@ a strategy is actually worth, a Texas Hold'em engine, and a Monty Hall sanity ch
 node odds.js                    # solve the strategy tables    -> output.json
 node blackjack.js               # grade the real basic strategy over 10,000,000 hands
 node blackjack.js output.json   # grade a table you just solved
+node blackjack.js basic.json 1 0.5   # single deck, cut half way down
 node texas.js                   # deal a full Hold'em hand, betting rounds and all
 node deal.js                    # Monty Hall, 10,000,000 runs
 ```
@@ -25,6 +26,28 @@ and the two grade almost the same at the table:
 Both measured with splits disabled, since the solver doesn't produce a splits table — see
 "What's left" below.
 
+### Deck count
+
+Dealing from a real shoe rather than with replacement reproduces the known deck effect,
+measured here at 75% penetration:
+
+| Decks | Edge |
+|---|---|
+| 1 | -0.00545 |
+| 2 | -0.00786 |
+| 4 | -0.00909 |
+| 6 | -0.00909 |
+| 8 | -0.00993 |
+| infinite (with replacement) | -0.00973 |
+
+Monotonic, flattening out, and converging on the with-replacement figure — which is what a
+finite shoe should do. The spread from one deck to eight is **0.0045**, against a
+real-world figure near 0.005. Most of the effect is spent by two decks.
+
+The gap between eight decks and infinite is far smaller than the gap between one and two,
+and at ~0.0003 it sits *below* this simulator's noise floor (see below) — it is visible as
+a direction, not as a resolved measurement.
+
 ### Can basic strategy be beaten?
 
 That was the original question, and the answer is **no** — not in this game, and not by
@@ -32,8 +55,13 @@ searching. Basic strategy *is* the EV-maximizing decision for every (hand, up-ca
 when the remaining deck is unknown. It is the solution to that optimization problem, so
 there is nothing above it to find. Only extra *information* beats it: composition-dependent
 play (using the specific cards making up your total, worth ~0.03%) or counting a finite
-shoe and spreading bets. An infinite shoe, as simulated here, destroys both by
-construction — every hand is drawn from an identical deck.
+shoe and spreading bets.
+
+Both are now at least *representable* here. Dealing from a real shoe means the deck
+depletes as it is played, so the remaining composition genuinely drifts and there is
+information on the table to exploit. Neither counting nor composition-dependent play is
+implemented — but with a with-replacement shoe they were impossible by construction, and
+now they are merely absent.
 
 Which makes the evolutionary search in `blackjack.js` unwinnable for a second, sharper
 reason: **it is searching below its own noise floor.** Three runs of the *same* table:
@@ -79,7 +107,17 @@ Dealer stands on soft 17, dealer takes a hole card and checks for a natural befo
 continues (as a casino does), naturals pay 3:2, late surrender, double on any two cards,
 one split with no resplit limit. **Insurance is deliberately absent** — it is never correct
 without counting, and basic strategy never takes it, so omitting it costs the simulation
-nothing. The shoe is infinite (see "What's left").
+nothing.
+
+Cards come from a real shoe: `NUM_DECKS` decks of 52, Fisher-Yates shuffled, dealt without
+replacement, with a cut card at `PENETRATION` of the way down. The cut card ends the shoe
+at the end of the round it appears in, never mid-hand. Both are CLI arguments, defaulting
+to six decks cut at 75%.
+
+This models a **batch** shuffler, not a continuous one. A CSM returns cards to the shoe
+after every round, which would put the game straight back to drawing with replacement.
+Penetration is the single biggest lever on what counting is worth, which is why it is a
+knob rather than a constant.
 
 ## The scale everything is measured on
 
@@ -161,9 +199,6 @@ doubles (11 vs 10, soft 12 vs 5, soft 13 vs 5).
 hand rather than sharing one, and split aces aren't restricted to a single card. Splitting
 is worth about 0.007% here against roughly 0.5% in reality, so the split logic is close to
 inert. The solver doesn't emit a splits table at all.
-
-**The shoe is infinite** — cards are drawn with replacement, so there is no depletion and
-no counting.
 
 Because the evolutionary search grades against this simulator, it should stay parked until
 the surrender conditioning is fixed.
