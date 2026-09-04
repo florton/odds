@@ -1,8 +1,9 @@
 # odds
 
 Card-game probability worked out from first principles, in plain Node with no
-dependencies. Four programs: a blackjack strategy solver, a simulator that measures what
-a strategy is actually worth, a Texas Hold'em engine, and a Monty Hall sanity check.
+dependencies. A blackjack strategy solver, a simulator that measures what a strategy is
+actually worth, a Texas Hold'em engine and measurement harness, and a Monty Hall sanity
+check.
 
 ```bash
 node odds.js                    # solve the strategy tables    -> output.json
@@ -11,6 +12,9 @@ node blackjack.js output.json   # grade a table you just solved
 node blackjack.js basic.json 1 0.5   # single deck, cut half way down
 node blackjack.js basic.json 6 0.75 count   # count the shoe and spread the bet
 node texas.js                   # deal a full Hold'em hand, betting rounds and all
+node texas.js 100000            # measure a lineup, in bb/100 with error bars
+node texas.js --test            # Hold'em engine invariants
+node texas-eval.js --enumerate  # check the hand evaluator on all C(52,7) hands
 node deal.js                    # Monty Hall, 10,000,000 runs
 ```
 
@@ -300,11 +304,88 @@ That is the right table for a shoe deep enough not to care, and it is why the so
 grades within noise of the published one, but it means the solver cannot express
 composition-dependent play or a count-adjusted decision even in principle.
 
-## texas.js — Hold'em
+## Hold'em — `texas-eval.js`, `texas-engine.js`, `texas.js`
 
-A complete Texas Hold'em hand: deck, Fisher-Yates shuffle, hole cards, flop/turn/river,
-five-card hand ranking, four betting rounds with fold/call/raise decisions driven by hand
-strength, and pot payout across the winners. Prints the hand as it plays.
+Rebuilt from the single-hand demo that was here before, which could deal and rank hands but
+could not measure anything. Four defects in it were structural rather than cosmetic:
+
+**Folded players won pots.** `folded` was local to the betting round and never returned, so
+the showdown scored every hand at the table whether it had been folded or not. A player
+could fold the flop and win on the river.
+
+**There were no blinds.** If folding is free, folding everything is a break-even strategy
+and it beats every losing one. Blinds are what make the game a game.
+
+**Kickers did not exist.** The evaluator returned `[category, oneValue]`, which is not an
+ordering: two pair compared only the higher pair, a flush only its top card, and AK and AQ
+chopped on an ace-high board.
+
+**No all-ins and no side pots**, so a short stack calling a big bet either won chips nobody
+had put in or lost chips it never owed.
+
+### texas-eval.js — hand ranking
+
+Packs the category and all five ranks into one integer, so comparing two hands is a single
+integer comparison with the kickers already in it. No combination enumeration and no
+allocation, which is what makes millions of hands per run tractable.
+
+`node texas-eval.js` runs 40 unit checks; `--enumerate` scores **all 133,784,560 seven-card
+hands** and matches the published category frequencies to four decimal places on every
+category. That is the same enumerate-don't-sample approach `odds.js` takes, and it is a
+proof rather than an estimate.
+
+### texas-engine.js — the table
+
+Blinds and button (reversed heads-up), correct action order, min-raise rules including the
+short all-in that does not reopen betting, side pots built in layers, uncalled bets
+returned, odd chips to the first seat left of the button, and rake with a cap and
+no-flop-no-drop.
+
+Two things in it are there for what comes next rather than for playing a hand:
+
+- **The deal is seeded and replayable.** A pre-shuffled deck can be handed in, which is what
+  makes it possible to play the same cards against two different strategies.
+- **Strategies see a view, never the table.** `act(view)` is handed that seat's own cards
+  and the public betting record, and nothing else. It is structurally impossible to read an
+  opponent's hole cards — or any label describing what kind of opponent it is.
+
+### texas.js — measurement
+
+Reports **bb/100 with a standard error**, because the lesson from the blackjack search is
+that a win rate without one is not a measurement.
+
+`compare(a, b, field)` sits two candidates in the same seat, against the same opponents, on
+the same deck, and differences the results hand by hand. Hands where the two would have
+played identically cancel to exactly zero and contribute no noise, so only genuine
+disagreements cost anything. This is the common random numbers idea from the blackjack
+post-mortem, finally implemented.
+
+How much it is worth depends entirely on how often the change changes a hand:
+
+| Change | Hands it altered | SE unpaired | SE paired | Reduction |
+|---|---|---|---|---|
+| Postflop calling threshold | 0.11% | 63.69 | 2.14 | **29.7x** |
+| Preflop calling range | 39.63% | 83.05 | 54.04 | **1.5x** |
+
+Which is the useful lesson for iterating: **small surgical changes are cheap to evaluate,
+sweeping ones are not.** A strategy compared against itself differences to exactly zero with
+no error bar at all, which is the check that the pairing is real.
+
+`--test` verifies the engine on 20,000 random hands with random stacks — chips in equals
+chips out plus rake, no folded player ever wins, no stack goes negative, every raise is a
+full raise or an all-in — and 19,703 of those hands built side pots, so the side-pot code is
+genuinely exercised rather than nominally present.
+
+### What's left
+
+**The reference strategies are placeholders.** They hardly ever bet, so hands get checked
+down and the showdown rate lands near 90% against the ~25–30% of a real 6-max game. The
+harness separates them and puts error bars on the separation, but those rates do not
+describe a casino table. Making the showdown rate realistic is the acceptance test for the
+strategy model, not a detail to tidy afterwards.
+
+**No opponent modelling yet.** The view carries the full action history, which is what a
+strategy would need to infer anything about who it is playing, and nothing reads it.
 
 ## deal.js — Monty Hall
 
