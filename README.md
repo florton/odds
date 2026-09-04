@@ -1,8 +1,9 @@
 # odds
 
 Card-game probability worked out from first principles, in plain Node with no
-dependencies. Four programs: a blackjack strategy solver, a simulator that measures what
-a strategy is actually worth, a Texas Hold'em engine, and a Monty Hall sanity check.
+dependencies. A blackjack strategy solver, a simulator that measures what a strategy is
+actually worth, a Texas Hold'em engine and measurement harness, and a Monty Hall sanity
+check.
 
 ```bash
 node odds.js                    # solve the strategy tables    -> output.json
@@ -11,6 +12,15 @@ node blackjack.js output.json   # grade a table you just solved
 node blackjack.js basic.json 1 0.5   # single deck, cut half way down
 node blackjack.js basic.json 6 0.75 count   # count the shoe and spread the bet
 node texas.js                   # deal a full Hold'em hand, betting rounds and all
+node texas.js 100000            # measure a lineup, in bb/100 with error bars
+node texas.js --players         # a field of personalities, and the stats it produces
+node texas.js --test            # Hold'em engine invariants
+node texas-eval.js --enumerate  # check the hand evaluator on all C(52,7) hands
+node texas-equity.js            # what the players know about hand strength
+node texas-equity.js --build    # regenerate equity.json (~2 min)
+node texas-calibrate.js         # fit the player model to real population stats
+node texas-calibrate.js --check # report the current fit without changing it
+node texas-calibrate.js --noise # the noise floor of the calibration objective
 node deal.js                    # Monty Hall, 10,000,000 runs
 ```
 
@@ -300,11 +310,323 @@ That is the right table for a shoe deep enough not to care, and it is why the so
 grades within noise of the published one, but it means the solver cannot express
 composition-dependent play or a count-adjusted decision even in principle.
 
-## texas.js — Hold'em
+## Hold'em — `texas-eval.js`, `texas-engine.js`, `texas.js`
 
-A complete Texas Hold'em hand: deck, Fisher-Yates shuffle, hole cards, flop/turn/river,
-five-card hand ranking, four betting rounds with fold/call/raise decisions driven by hand
-strength, and pot payout across the winners. Prints the hand as it plays.
+Rebuilt from the single-hand demo that was here before, which could deal and rank hands but
+could not measure anything. Four defects in it were structural rather than cosmetic:
+
+**Folded players won pots.** `folded` was local to the betting round and never returned, so
+the showdown scored every hand at the table whether it had been folded or not. A player
+could fold the flop and win on the river.
+
+**There were no blinds.** If folding is free, folding everything is a break-even strategy
+and it beats every losing one. Blinds are what make the game a game.
+
+**Kickers did not exist.** The evaluator returned `[category, oneValue]`, which is not an
+ordering: two pair compared only the higher pair, a flush only its top card, and AK and AQ
+chopped on an ace-high board.
+
+**No all-ins and no side pots**, so a short stack calling a big bet either won chips nobody
+had put in or lost chips it never owed.
+
+### texas-eval.js — hand ranking
+
+Packs the category and all five ranks into one integer, so comparing two hands is a single
+integer comparison with the kickers already in it. No combination enumeration and no
+allocation, which is what makes millions of hands per run tractable.
+
+`node texas-eval.js` runs 40 unit checks; `--enumerate` scores **all 133,784,560 seven-card
+hands** and matches the published category frequencies to four decimal places on every
+category. That is the same enumerate-don't-sample approach `odds.js` takes, and it is a
+proof rather than an estimate.
+
+### texas-engine.js — the table
+
+Blinds and button (reversed heads-up), correct action order, min-raise rules including the
+short all-in that does not reopen betting, side pots built in layers, uncalled bets
+returned, odd chips to the first seat left of the button, and rake with a cap and
+no-flop-no-drop.
+
+Two things in it are there for what comes next rather than for playing a hand:
+
+- **The deal is seeded and replayable.** A pre-shuffled deck can be handed in, which is what
+  makes it possible to play the same cards against two different strategies.
+- **Strategies see a view, never the table.** `act(view)` is handed that seat's own cards
+  and the public betting record, and nothing else. It is structurally impossible to read an
+  opponent's hole cards — or any label describing what kind of opponent it is.
+
+### texas.js — measurement
+
+Reports **bb/100 with a standard error**, because the lesson from the blackjack search is
+that a win rate without one is not a measurement.
+
+`compare(a, b, field)` sits two candidates in the same seat, against the same opponents, on
+the same deck, and differences the results hand by hand. Hands where the two would have
+played identically cancel to exactly zero and contribute no noise, so only genuine
+disagreements cost anything. This is the common random numbers idea from the blackjack
+post-mortem, finally implemented.
+
+How much it is worth depends entirely on how often the change changes a hand:
+
+| Change | Hands it altered | SE unpaired | SE paired | Reduction |
+|---|---|---|---|---|
+| Postflop calling threshold | 0.11% | 63.69 | 2.14 | **29.7x** |
+| Preflop calling range | 39.63% | 83.05 | 54.04 | **1.5x** |
+
+Which is the useful lesson for iterating: **small surgical changes are cheap to evaluate,
+sweeping ones are not.** A strategy compared against itself differences to exactly zero with
+no error bar at all, which is the check that the pairing is real.
+
+`--test` verifies the engine on 20,000 random hands with random stacks — chips in equals
+chips out plus rake, no folded player ever wins, no stack goes negative, every raise is a
+full raise or an all-in — and 19,703 of those hands built side pots, so the side-pot code is
+genuinely exercised rather than nominally present.
+
+### texas-equity.js — how strong is my hand
+
+Rolling out equity at every decision is both expensive (measured at about a hundredfold)
+and wrong as a model — nobody at a table runs Monte Carlo in their head. So the split is
+between what a player has genuinely internalised, computed exactly, and what they work out
+at the table, approximated with the shortcuts they actually use:
+
+- **Preflop** all 169 starting hands are solved against 1–8 opponents and cached, because a
+  competent player really does know these. The table reproduces the published figures: AA
+  85.2% heads up, KK 82.7%, QQ 80.1%, AKs 67.2%, AKo 65.6%, and AA 49.0% six-handed.
+- **Postflop** hand strength is a percentile read off the **exact** distribution of all
+  133,784,560 seven-card hands (4,824 distinct values), and draws are priced with the 2×/4×
+  rule that every player at every level uses.
+
+That makes proficiency mean something sharper than noise on a perfect answer: a weak player
+**miscounts their outs, misprices a multiway pot, and overvalues their made hand**. The
+ceiling is a good human rather than a solver, which is the right ceiling for a cash game.
+
+### texas-players.js — personality and proficiency
+
+Two dials, deliberately independent:
+
+**Personality** is what a player wants to do — it biases the chip value of each action.
+Aggression makes betting look better, stickiness makes calling look better, bluffiness makes
+betting look better *specifically when the hand is weak*.
+
+**Proficiency** is how well they do it, and it acts in two separate places: how accurate
+their read is, and how reliably they pick the action they themselves rate highest (a softmax
+temperature).
+
+Keeping them separate is the point. Raising proficiency does not turn an aggressive player
+passive — it turns a *wild* aggressive player into a *disciplined* one. The same LAG
+archetype at three proficiencies, 25,000 hands:
+
+| LAG at | VPIP | PFR | AF | WTSD | bb/100 |
+|---|---|---|---|---|---|
+| 0.15 | 67.1 | 46.7 | 1.36 | 17.6 | −374 |
+| 0.50 | 63.3 | 44.4 | 1.48 | 20.5 | −78 |
+| 0.90 | 41.6 | 34.0 | 3.66 | 25.5 | +961 |
+
+Which also answers a question worth not guessing at: for a fixed personality, **higher
+proficiency narrows the range and raises the aggression factor.** Range width is not a
+parameter here — it falls out of the traits and the proficiency and is *measured*
+afterwards, because asserting it would beg the question the simulation exists to answer.
+
+Nothing a strategy under test can see reveals which archetype it is facing. Only the betting
+record.
+
+### Two modelling errors worth recording
+
+Both were found by measuring the field rather than by reading the code, and both are the
+same mistake in different clothes: **pricing an action off unconditional equity.**
+
+**A raise got more attractive the more it had been called.** Fold equity was a term
+`foldsOut × pot`, and since every raise grows the pot, each raise looked better than the
+last. The field settled into an unbounded re-raise war — **15.4 preflop raises per hand**,
+ending 91% of hands heads-up and all-in before the flop. Fold equity now decays with how
+committed the opponents already are *and* with how many times the pot has already been
+raised, read off the betting history — which is where a real player gets it. Preflop raises
+fell to 1.56 per hand and the showdown rate from 97% to 63%.
+
+**Being called is bad news.** Equity is measured against random hands, but somebody putting
+chips in is not holding a random hand, and the bigger the bet the less random it is. Calls
+and raises are now shaded by the price being laid.
+
+### texas-calibrate.js — fitting the model to real players
+
+None of the constants in the player model are derivable. How much fold equity a half-pot bet
+really has, how far to discount a call for the news that somebody bet into you, how random an
+unskilled player is — these are empirical facts about people, and the only honest way to set
+them is to fit them until the simulated field reproduces behaviour measured on real ones.
+
+**This is the search blackjack.js couldn't run.** That one graded candidates on win rate and
+drowned: σ ≈ 1.04 per hand meant resolving a 0.0001 edge took a billion hands, and it accepted
+noise as progress for as long as it ran. Calibration escapes that by not fitting to a win rate
+at all. Fitting to *behaviour* is three orders of magnitude cheaper:
+
+| Statistic | sd over 8,000 hands | Target |
+|---|---|---|
+| VPIP | 0.066 | 22 |
+| PFR | 0.098 | 18 |
+| AF | 0.004 | 2.5 |
+| endsPreflop | 0.403 | 60 |
+
+against a standard error near **20** for bb/100 over the same hands. Every candidate is also
+graded on the same seeded deals, so two parameter sets that behave identically score
+identically to the bit — the common random numbers idea again, and the reason 384 evaluations
+suffice where ten million hands per candidate did not.
+
+The fit runs in two stages, which is possible because of an exact property of the model:
+**with neutral traits every personality term multiplies by zero.** So a homogeneous table of
+neutral players measures the value model alone, with the trait scales unable to affect it
+even in principle. Stage 1 fits the value model there; stage 2 fits the archetypes.
+
+A table of regulars now reproduces **every** statistic it is graded on:
+
+| | Uncalibrated | Fitted | Target |
+|---|---|---|---|
+| VPIP | 39.3 | **23.9** | 22 |
+| PFR | 17.3 | **16.4** | 18 |
+| AF | 1.1 | **2.6** | 2.5 |
+| WTSD | 89.2 | **26.5** | 26 |
+| Hands ending preflop | 13.0 | **60.2** | 60 |
+
+and the table-level showdown rate lands at **25.9%** against a real 25–30%, having been
+between 65% and 92% in every run before it. **No parameter rests on a bound**, so this is a
+converged fit rather than a constrained one.
+
+The named types are partly there. Nit and TAG hit their marks; the looser three are still
+too loose:
+
+| Type | VPIP | PFR | AF | WTSD |
+|---|---|---|---|---|
+| nit | **13.3** / 13 | **9.5** / 10 | **2.0** / 2.2 | 17.7 / 24 |
+| tag | **22.6** / 22 | 14.7 / 19 | **2.9** / 2.6 | **25.8** / 26 |
+| lag | 51.8 / 32 | 34.1 / 25 | 2.6 / 3.2 | **30.6** / 29 |
+| station | 61.7 / 45 | 11.3 / 6 | **0.3** / 0.6 | 19.4 / 42 |
+| maniac | 71.3 / 62 | 42.5 / 38 | 1.6 / 2.4 | 24.4 / 36 |
+
+### What a pinned parameter was telling us
+
+`callShade` sat on its bound across three separate fits. That turned out to mean the model
+was missing a distinction, not that the constant was too small: **one number was being asked
+to price two different pieces of news.** A preflop raise is a narrow, honest range — almost
+nobody opens trash from early position — so it should be believed. A postflop bet is a much
+weaker signal, since continuation bets are made with most of a range whether they connected
+or not. Fitting one constant, the search drove it high enough to make preflop tight, and that
+same shade then folded every flop, which is exactly why showdowns were reached on 15.8% of
+hands against a real 26%.
+
+Split in two, `callShadePre` fitted to **0.487** and `callShadePost` to **0.275** — neither
+anywhere near a bound. The pin was a symptom of a missing term, as the bound check exists to
+suggest.
+
+Two more of the same kind:
+
+**Equity realisation is a forecast, and was being charged twice.** It prices what will happen
+on the streets still to come, so it belongs preflop; once those streets arrive the
+disadvantage is already being paid in the action order itself. Applying it every street folded
+so many flops that showdowns fell to 6%. Given a separate postflop weight to fit, the search
+set it to **0.042** — essentially zero, independently confirming the argument.
+
+**`looseness` and `stickiness` had to be separated by street**, which is what their names
+always meant: looseness is playing too many hands, stickiness is refusing to release the ones
+you played. Applied together everywhere they were welded, so the only calling station the
+model could build also limped every hand. Separated — and once the station's targets included
+the WTSD that actually defines one — its showdown rate went from 20.5 to **37.6** against a
+target of 42.
+
+### The bug that mattered most was in the measurement
+
+`wtsd` divided showdowns by **every hand dealt**. The published statistic is "Went To
+ShowDown *when Saw Flop*" — the denominator is hands that reached a flop. A player who enters
+22% of hands cannot show down 26% of them, so **the target was unreachable by construction**,
+and five consecutive calibration runs duly failed to move it however the model changed.
+
+Worse than not moving, it pointed the wrong way. Read as 17 against 26 it said the players
+were folding too much after the flop, and two rounds of work went into loosening them.
+Measured correctly the truth was the reverse: **WTSD was 89.2%**, players facing a flop bet
+folded **10.2%** of the time against a real 50–60%, and there were 4.6 raises per flop.
+Nothing was ever won without a showdown, because nobody could be made to let go.
+
+The lesson is the cheap one to state and the expensive one to learn: a wrong statistic is
+worse than a missing one, because a missing one is silent and a wrong one gives instructions.
+
+Two levers fixed it. `callShadePostBase` is a flat discount on any postflop call — the
+price-scaled term alone cannot do the job, since a 60%-pot bet has a price of only 0.375, so
+even a maximal coefficient leaves a hand that beats half the field calling comfortably. But a
+bet is bad news whatever its size. `futureCost` charges a call for the streets still to come,
+since calling a flop bet buys a turn that has to be paid for again; it turned out to be the
+weaker of the two, which is worth knowing.
+
+### A search bug worth recording
+
+Stage 1 was quitting after two passes with two parameters never moved from their defaults,
+landing a fit measurably worse than an earlier run had reached. Fixed-size steps stop at the
+first point where no single coarse move helps, which is not a minimum — it is the resolution
+running out. Shrinking the step instead of halting took stage 1 from 63 evaluations and error
+0.091 to 397 evaluations and error **0.036**.
+
+The same change applied to stage 2 made it slightly *worse* — 0.0489 against 0.0419 — because
+coordinate descent is greedy and a different step schedule drops it into a different local
+optimum. More search is not automatically a better fit, and the stage-2 objective has several
+optima within about 15% of each other. Stage 2 now runs from three displaced starts and keeps
+the best, reporting the spread between them so the run says for itself how much to trust the
+answer.
+
+**The stages have to alternate.** Stage 2 fits the archetype traits against whatever the trait
+scales currently are, and stage 3 then moves those scales, invalidating the traits it was just
+handed. Run once each, it pushed `pullLooseness` from 0.5 to 1.21 and left the LAG — whose
+traits had been fitted for 0.5 — playing 59.6% of hands against a target of 32. Cycling them
+took the archetype error from **0.405 to 0.159 to 0.127**.
+
+Neither stage can disturb the table of regulars, because both move only quantities multiplied
+by a trait's distance from neutral, and the regulars sit at neutral. The stage 1 fit is
+structurally protected from everything that follows it — the same zero-multiplication property
+that made splitting the fit possible in the first place.
+
+### Three things the calibration found
+
+**The model had no concept of position.** Every seat priced a hand identically, so the small
+blind — getting 1-to-call into a 3-chip pot — limped anything clearing the raw pot odds. Real
+players fold most of those despite the price, because the price is not the whole cost: they
+act first on every later street. Equity realisation by distance from the button is now in the
+model, and it fitted to 0.46 — a large effect, and the single change that moved hands ending
+preflop from 13% to 36%.
+
+**The trait scales and the archetype traits are the same degree of freedom.** Doubling a pull
+and halving every trait's distance from neutral gives back an identical player, so fitting
+both is over-parameterised — and a search asked to do it exhausts the cheaper knob, which is
+what pinned three parameters to their bounds across two runs. The pulls are now held fixed and
+the traits are what gets fitted. Stage-2 error fell from 0.42 to 0.077.
+
+**Averaging one error across five archetypes lets the search trade them off.** It bought an
+accurate nit by driving the calling station to 85% VPIP. Each type is now graded only against
+its own targets.
+
+A parameter resting on a bound is reported as `AT BOUND`, because that is a *constrained* fit
+rather than a converged one, and it usually means the model is missing a term rather than that
+a constant is wrong. That is how the position gap surfaced.
+
+### What's left
+
+**Three of the five named types are still too loose.** The LAG plays 51.8% of hands against a
+target of 32, and the calling station reaches showdown on 19.4% of its flops against 42 — the
+one stat that most defines it. Its stickiness is fitted to 0.98, hard against the ceiling, and
+the fit still chose a *low* `pullStickiness` of 0.39, because raising it to help the station
+would push the TAG and the nit off their marks.
+
+That is the real limit now: **one global scale per trait has to serve five types whose needs
+conflict.** Per-archetype scales would resolve it, at the cost of five times the parameters —
+or the traits themselves need to be more expressive than a single number per axis.
+
+**Nothing above is a claim about poker yet.** The field reproduces the behaviour it was fitted
+to, which is exactly as much as can be said: reproducing VPIP, PFR, AF and showdown rates is
+evidence the players act like players, not that the win rates between them are right. Those
+have not been validated against anything.
+
+**No opponent modelling.** The view carries the full action history and `observe()` is called
+after every hand, so a strategy *could* build a read. Nothing does yet.
+
+**No scenario sweep and no distillation.** `playHand` returns a complete hand record — every
+action with pot size, price and stack — and nothing reads it except the chip deltas. Turning
+those records into win rates by circumstance is the original goal and has not been started.
+
 
 ## deal.js — Monty Hall
 
