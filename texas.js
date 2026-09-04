@@ -125,7 +125,8 @@ const measure = (bots, opts = {}) => {
     ante = 0,
     rake = { percent: 0, cap: 0, noFlopNoDrop: true },
     seed = 1,
-    paired = false
+    paired = false,
+    tracker = null
   } = opts
 
   const n = bots.length
@@ -173,6 +174,14 @@ const measure = (bots, opts = {}) => {
       })
 
       for (let s = 0; s < n; s++) perBot[(s + r) % n] += result.deltas[s]
+      // Strategies that carry state between hands -- tilt, or a read on an
+      // opponent -- are told how the hand finished. They still only learn what
+      // the table saw, since the result carries no hole cards for anyone who
+      // did not show them down.
+      for (let s = 0; s < n; s++) {
+        if (lineup[s].observe) lineup[s].observe(result, s)
+      }
+      if (tracker) tracker.record(result)
       illegal += result.illegal
       rakeTotal += result.rakePaid
       if (result.wentToShowdown) showdowns++
@@ -571,7 +580,69 @@ const runTests = () => {
 
 const arg = process.argv[2]
 
-if (arg === '--test') {
+// A field of personalities, and the stats it produces. This is the calibration
+// check: the archetypes are only worth their names if a nit really does play
+// tight and a station really does call too much, measured rather than asserted.
+//
+// Reference points for 6-max cash, from the way these stats are normally
+// quoted: a solid regular runs about 22/18 with an aggression factor near 2.5
+// and sees a showdown on roughly a quarter of hands; a loose passive player
+// runs 40+/5 with an AF below 1.
+const runPlayers = (hands) => {
+  const { archetype, makeTracker } = require('./texas-players')
+  const rng = makeRng(4242)
+  const field = [
+    archetype('nit', 0.75, rng, 'Nit .75'),
+    archetype('tag', 0.85, rng, 'TAG .85'),
+    archetype('lag', 0.80, rng, 'LAG .80'),
+    archetype('station', 0.30, rng, 'Station .30'),
+    archetype('maniac', 0.25, rng, 'Maniac .25'),
+    archetype('bluffer', 0.55, rng, 'Bluffer .55')
+  ]
+  const tracker = makeTracker(field.length)
+  const out = measure(field, { hands, seed: 5, tracker })
+
+  console.log('\nPersonality field, 6-max 1/2, 100bb, no rake  (' +
+    out.handsPlayed.toLocaleString() + ' hands)')
+  console.log('  showdown ' + (out.showdownRate * 100).toFixed(1) +
+    '%   (a real 6-max game runs 25-30%)')
+  console.log('  ' + 'player'.padEnd(13) + 'VPIP'.padStart(6) + 'PFR'.padStart(6) +
+    'AF'.padStart(6) + 'WTSD'.padStart(7) + 'bb/100'.padStart(10))
+  for (const s of tracker.summary(field.map((f) => f.name), 2)) {
+    console.log('  ' + s.name.padEnd(13) +
+      s.vpip.toFixed(1).padStart(6) + s.pfr.toFixed(1).padStart(6) +
+      (isFinite(s.af) ? s.af.toFixed(2) : 'inf').padStart(6) +
+      s.wtsd.toFixed(1).padStart(7) + s.bb100.toFixed(1).padStart(10))
+  }
+
+  // The same archetype at three proficiencies. If the two dials are really
+  // independent, these should stay recognisably the same personality and
+  // differ in how well it is executed -- not drift into a different player.
+  console.log('\nOne archetype (LAG) at three proficiencies')
+  const rng2 = makeRng(77)
+  const ladder = [
+    archetype('lag', 0.15, rng2, 'LAG .15'),
+    archetype('lag', 0.50, rng2, 'LAG .50'),
+    archetype('lag', 0.90, rng2, 'LAG .90'),
+    archetype('tag', 0.60, rng2, 'TAG .60'),
+    archetype('station', 0.40, rng2, 'Station'),
+    archetype('nit', 0.60, rng2, 'Nit')
+  ]
+  const t2 = makeTracker(ladder.length)
+  measure(ladder, { hands, seed: 6, tracker: t2 })
+  console.log('  ' + 'player'.padEnd(13) + 'VPIP'.padStart(6) + 'PFR'.padStart(6) +
+    'AF'.padStart(6) + 'WTSD'.padStart(7) + 'bb/100'.padStart(10))
+  for (const s of t2.summary(ladder.map((f) => f.name), 2)) {
+    console.log('  ' + s.name.padEnd(13) +
+      s.vpip.toFixed(1).padStart(6) + s.pfr.toFixed(1).padStart(6) +
+      (isFinite(s.af) ? s.af.toFixed(2) : 'inf').padStart(6) +
+      s.wtsd.toFixed(1).padStart(7) + s.bb100.toFixed(1).padStart(10))
+  }
+}
+
+if (arg === '--players') {
+  runPlayers(Number(process.argv[3]) || 40000)
+} else if (arg === '--test') {
   process.exit(runTests() === 0 ? 0 : 1)
 } else if (arg && Number(arg)) {
   const hands = Number(arg)

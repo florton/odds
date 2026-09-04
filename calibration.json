@@ -1,0 +1,141 @@
+{
+  "params": {
+    "pullAggression": 0.9880390625000001,
+    "pullLooseness": 1.2103478515625001,
+    "pullStickiness": 0.39177511411361704,
+    "pullBluffiness": 0.5957616692352297,
+    "foldBase": 0.1580404387084961,
+    "foldSlope": 0.6737500000000001,
+    "stubbornness": 0.754351171875,
+    "callShadePre": 2.357385817023,
+    "callShadePost": 0.2213005468948014,
+    "raiseShade": 0.55125,
+    "callShadePostBase": 0.4449122449253081,
+    "futureCost": 0.5075,
+    "temperature": 1.47,
+    "pullPosition": 0.7993125,
+    "positionPostWeight": 0.476984375,
+    "maxBias": 1.065
+  },
+  "archetypes": {
+    "nit": {
+      "looseness": 0.11,
+      "aggression": 0.3,
+      "stickiness": 0.47,
+      "bluffiness": 0.02
+    },
+    "tag": {
+      "looseness": 0.47,
+      "aggression": 0.57,
+      "stickiness": 0.16999999999999998,
+      "bluffiness": 0.49000000000000005
+    },
+    "lag": {
+      "looseness": 0.65,
+      "aggression": 0.73,
+      "stickiness": 0.37,
+      "bluffiness": 0.69
+    },
+    "station": {
+      "looseness": 0.92,
+      "aggression": 0.02,
+      "stickiness": 0.98,
+      "bluffiness": 0.02
+    },
+    "maniac": {
+      "looseness": 0.8400000000000001,
+      "aggression": 0.95,
+      "stickiness": 0.32,
+      "bluffiness": 0.82
+    }
+  },
+  "targets": {
+    "regulars": {
+      "vpip": 22,
+      "pfr": 18,
+      "af": 2.5,
+      "wtsd": 26,
+      "endsPreflop": 60
+    },
+    "field": {
+      "nit": {
+        "vpip": 13,
+        "pfr": 10,
+        "af": 2.2,
+        "wtsd": 24
+      },
+      "tag": {
+        "vpip": 22,
+        "pfr": 19,
+        "af": 2.6,
+        "wtsd": 26
+      },
+      "lag": {
+        "vpip": 32,
+        "pfr": 25,
+        "af": 3.2,
+        "wtsd": 29
+      },
+      "station": {
+        "vpip": 45,
+        "pfr": 6,
+        "af": 0.6,
+        "wtsd": 42
+      },
+      "maniac": {
+        "vpip": 62,
+        "pfr": 38,
+        "af": 2.4,
+        "wtsd": 36
+      }
+    }
+  },
+  "fitted": {
+    "regulars": {
+      "vpip": 23.860416666666666,
+      "pfr": 16.35625,
+      "af": 2.5664034301467087,
+      "wtsd": 26.456289128810795,
+      "endsPreflop": 60.150000000000006
+    },
+    "field": {
+      "nit": {
+        "vpip": 13.325000000000001,
+        "pfr": 9.4625,
+        "af": 2.0217076700434156,
+        "wtsd": 17.733990147783253,
+        "n": 1
+      },
+      "tag": {
+        "vpip": 22.575000000000003,
+        "pfr": 14.66875,
+        "af": 2.9434993425378044,
+        "wtsd": 25.827466052163654,
+        "n": 2
+      },
+      "lag": {
+        "vpip": 51.7625,
+        "pfr": 34.112500000000004,
+        "af": 2.5814350797266514,
+        "wtsd": 30.61465721040189,
+        "n": 1
+      },
+      "station": {
+        "vpip": 61.68749999999999,
+        "pfr": 11.325000000000001,
+        "af": 0.26018340797611433,
+        "wtsd": 19.43620178041543,
+        "n": 1
+      },
+      "maniac": {
+        "vpip": 71.275,
+        "pfr": 42.5375,
+        "af": 1.6411205073995772,
+        "wtsd": 24.356297842727905,
+        "n": 1
+      }
+    }
+  },
+  "hands": 8000,
+  "generated": "2026-09-04T06:50:21.822Z"
+}
