@@ -173,6 +173,16 @@ const boardStrength = (hole, board) => {
   const theirs = new Array(2 + board.length)
   for (let i = 0; i < board.length; i++) theirs[2 + i] = board[i]
 
+  // Without a flush, a hand's score depends only on its ranks, and on a fixed
+  // board the opponent contributes just two of them -- at most 91 distinct
+  // rank pairs among the 1081 holdings. So each rank pair is evaluated once
+  // and reused, and only holdings that could complete a flush are evaluated
+  // individually. The result is identical to evaluating every holding, at
+  // about a tenth of the cost; evaluation was three quarters of all runtime.
+  const boardSuits = [0, 0, 0, 0]
+  for (let i = 0; i < board.length; i++) boardSuits[board[i] & 3]++
+  const byRanks = new Int32Array(169).fill(-1)
+
   let ahead = 0
   let tied = 0
   let total = 0
@@ -182,7 +192,18 @@ const boardStrength = (hole, board) => {
     for (let y = x + 1; y < 52; y++) {
       if (seen[y]) continue
       theirs[1] = y
-      const score = evaluate(theirs)
+      const xs = x & 3
+      const ys = y & 3
+      const flushable = boardSuits[xs] + 1 + (xs === ys ? 1 : 0) >= 5 ||
+        boardSuits[ys] + 1 + (xs === ys ? 1 : 0) >= 5
+      let score
+      if (flushable) {
+        score = evaluate(theirs)
+      } else {
+        const slot = (x >> 2) * 13 + (y >> 2)
+        score = byRanks[slot]
+        if (score < 0) score = byRanks[slot] = evaluate(theirs)
+      }
       if (mine > score) ahead++
       else if (mine === score) tied++
       total++

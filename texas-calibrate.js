@@ -225,6 +225,7 @@ const BOUNDS = {
   callShadePost: [0.0, 0.99],
   raiseShade: [0.0, 0.99],
   temperature: [0.05, 6.0],
+  temperatureCurve: [0.05, 2.0],
   pullPosition: [0.02, 1.20],
   positionPostWeight: [0.0, 1.0],
   maxBias: [0.05, 1.2],
@@ -290,7 +291,7 @@ const search = (start, keys, evaluate, passes, label) => {
 // Each archetype is graded only against its own targets, so a type that is hard
 // to hit cannot drag the others off -- the previous version averaged one error
 // across all five and bought a good nit by wrecking the calling station.
-const TRAIT_KEYS = ['looseness', 'aggression', 'stickiness', 'bluffiness']
+const TRAIT_KEYS = ['looseness', 'preflopAggression', 'aggression', 'stickiness', 'bluffiness']
 
 const archetypeError = (got) => {
   const per = {}
@@ -470,7 +471,13 @@ if (require.main === module) {
     const startTraits = {}
     for (const kind of Object.keys(FIELD_TARGETS)) {
       startTraits[kind] = {}
-      for (const key of TRAIT_KEYS) startTraits[kind][key] = ARCHETYPES[kind][key]
+      for (const key of TRAIT_KEYS) {
+        // A type that has never had its preflop aggression fitted starts from
+        // its single aggression value, which is what it was playing with.
+        startTraits[kind][key] = ARCHETYPES[kind][key] !== undefined
+          ? ARCHETYPES[kind][key]
+          : ARCHETYPES[kind].aggression
+      }
     }
     let s2 = searchTraits(startTraits, s1.best, HANDS, 8, 5)
 
@@ -488,8 +495,16 @@ if (require.main === module) {
     // So they are fitted here, last, and only after the traits have taken up
     // all the slack they can.
     console.log('\nStage 3: the trait scales, with the traits fixed')
+    //
+    // The temperature curve belongs here too, for the same structural reason:
+    // it pivots on the regulars' proficiency, so it moves every player except
+    // the ones stage 1 was fitted on. It exists because the calling station
+    // was not missing its showdown target for want of stickiness. Played at
+    // proficiency 0.35 its softmax was hot enough to fold flops at random and
+    // raise hands at random -- WTSD 19, PFR 12 -- and the same traits at 0.85
+    // gave WTSD 40 and PFR 0.1. No trait scale can fix noise.
     const stage3Keys = ['pullAggression', 'pullLooseness', 'pullStickiness',
-      'pullBluffiness', 'maxBias']
+      'pullBluffiness', 'maxBias', 'temperatureCurve']
 
     // Stages 2 and 3 have to alternate rather than run once each. Stage 2 fits
     // the traits against whatever the pulls currently are; stage 3 then moves
@@ -562,4 +577,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { REG_TARGETS, FIELD_TARGETS, measureRegs, measureArchetypes }
+module.exports = { REG_TARGETS, FIELD_TARGETS, FIELD_SKILL, measureRegs, measureArchetypes }

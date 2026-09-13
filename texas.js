@@ -181,7 +181,9 @@ const measure = (bots, opts = {}) => {
       for (let s = 0; s < n; s++) {
         if (lineup[s].observe) lineup[s].observe(result, s)
       }
-      if (tracker) tracker.record(result)
+      // The lineup goes with it, because under duplicate dealing a seat is not
+      // a player -- the occupants move every rotation.
+      if (tracker) tracker.record(result, lineup)
       illegal += result.illegal
       rakeTotal += result.rakePaid
       if (result.wentToShowdown) showdowns++
@@ -578,7 +580,8 @@ const runTests = () => {
 
 // -------------------------------------------------------------------- main
 
-const arg = process.argv[2]
+// Only when run directly. texas-results.js requires this file for `measure`.
+const arg = require.main === module ? process.argv[2] : null
 
 // A field of personalities, and the stats it produces. This is the calibration
 // check: the archetypes are only worth their names if a nit really does play
@@ -671,7 +674,7 @@ if (arg === '--players') {
     lineup.slice(1),
     { hands: Math.min(hands, 40000), seed: 7 }
   ))
-} else {
+} else if (require.main === module) {
   const rng = makeRng(Date.now() >>> 0)
   const lineup = [
     { name: 'Rock', act: rock.act },
@@ -692,3 +695,5 @@ if (arg === '--players') {
     log: (s) => console.log(s)
   })
 }
+
+module.exports = { measure, compare, makeRock, makeRandomBot, folder, caller, maniac }

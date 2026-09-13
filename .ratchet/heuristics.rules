@@ -1,0 +1,64 @@
+# Experiment 2 (odds), re-run against ratchet v0.8.
+#
+# The v0 run of this experiment needed a project-local tools/ratchet-check.js
+# -- 77 lines -- plus a tools/seed.js, to say four things. Every one of the
+# four was the same shape: run a command, pull a number out of what it
+# printed, assert the number sits in a band anchored to a published table.
+# That shape is the vocabulary now, so the plumbing is gone and the four
+# subjects are the sentences below.
+#
+# The bands are unchanged from the v0 run. They come from outside this
+# repository -- published blackjack basic-strategy tables and the Monty Hall
+# result -- which is the point: a check that merely re-encoded the fix would
+# prove nothing.
+
+heuristic basic-edge
+  run      node blackjack.js basic.json 6 0.75 flat 300000
+  seed     20260905
+  timeout  600000
+  applies  when blackjack.js exists
+  measure  edge  number after "edge:"
+  rule     edge is between -0.03 and 0.015
+  because  every published basic-strategy table puts the house edge for these
+  because  rules near -0.005; fifteen times that is a simulator bug, not variance
+
+heuristic solver-grade
+  run      node blackjack.js output.json 1 0.5 flat 300000
+  seed     20260905
+  timeout  600000
+  applies  when output.json exists
+  measure  edge  number after "edge:"
+  rule     edge is between -0.03 and 0.01
+  because  a solved table graded against its own solver should land near the
+  because  published edge; a throw or a wild number means the grader broke
+
+heuristic monty-hall
+  run      node deal.js
+  seed     20260905
+  timeout  600000
+  applies  when deal.js exists
+  measure  total  number after "Total Iterations:"
+  measure  keep  number after "Keep wins:"
+  measure  change  number after "Change wins:"
+  rule     total is 10000000
+  rule     keep is between 3200000 and 3500000
+  rule     change is between 6500000 and 6800000
+  note     the bands are the v0 run's 0.32-0.35 and 0.65-0.68 multiplied by the
+  note     iteration count, which `total` pins. The direct reading -- the second
+  note     "Win percent:" in the output -- is not expressible: an extractor
+  note     anchored to a label takes the first match, and there is no way to say
+  note     "the second one", nor to say "change is above keep"
+  because  Monty Hall is 1/3 keep and 2/3 switch, an outside truth that does not
+  because  depend on any of this code being right
+
+heuristic texas-selfcheck
+  run      node texas.js
+  seed     20260905
+  timeout  600000
+  applies  when texas.js exists
+  measure  status  exit code
+  measure  failures  count of lines matching "FAIL"
+  rule     status is 0
+  rule     failures is 0
+  because  the project's own self-check, adopted as-is: no new assertions to
+  because  write, and it rides along every replay for free
