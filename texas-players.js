@@ -117,6 +117,7 @@ const PARAMS = {
 
   // Proficiency to softmax temperature.
   temperature: 1.2,
+  temperatureCurve: 1.0,
 
   // How much position is worth. Chips out of position are worth less than the
   // same chips on the button, because every later street has to be acted on
@@ -274,7 +275,20 @@ const actionValues = (v, equity, opponents, sizing = 0.6) => {
 // that a personality is equally opinionated in a big pot and a small one.
 const applyTraits = (values, traits, equity, pot, tiltLevel, preflop) => {
   const out = { ...values }
-  const aggression = clamp01(traits.aggression + tiltLevel * 0.3)
+  // Aggression is split by street, for the same reason calling was: PFR and AF
+  // are tracked separately because they are separate habits. As one trait it
+  // could not build a LAG. Loosening its calling from 0.65 all the way to 0.02
+  // took VPIP only from 51.8 to 35.8 while PFR stayed at 35.5 -- it was raising
+  // nearly every hand it played -- and lowering aggression enough to bring PFR
+  // to 15 dragged its postflop AF down to 1.0 with it. A player who opens
+  // selectively and then bets relentlessly was not expressible.
+  //
+  // Falls back to `aggression` when not given, so a player defined with one
+  // number behaves exactly as it did before the split.
+  const streetAggression = preflop && traits.preflopAggression !== undefined
+    ? traits.preflopAggression
+    : traits.aggression
+  const aggression = clamp01(streetAggression + tiltLevel * 0.3)
   const looseness = clamp01(traits.looseness + tiltLevel * 0.4)
 
   if (out.raise !== undefined) {
@@ -330,7 +344,8 @@ const applyTraits = (values, traits, equity, pot, tiltLevel, preflop) => {
 // the whole reason the two dials are separate.
 const choose = (values, proficiency, pot, rng) => {
   const keys = Object.keys(values).filter((k) => k !== 'raiseTo')
-  const temperature = pot * (1.02 - proficiency) * PARAMS.temperature
+  const temperature = pot * PARAMS.temperature * REG_SLOPPINESS *
+    Math.pow((1.02 - proficiency) / REG_SLOPPINESS, PARAMS.temperatureCurve)
 
   if (temperature < 1e-9) {
     let best = keys[0]
@@ -350,6 +365,13 @@ const choose = (values, proficiency, pot, rng) => {
   }
   return keys[keys.length - 1]
 }
+
+// The sloppiness of the proficiency the table of regulars is fitted at. The
+// temperature curve pivots on this point, so bending it reshapes how erratic
+// weaker and stronger players are while leaving the regulars -- and therefore
+// the whole stage 1 fit -- exactly where they were.
+const REG_PROFICIENCY = 0.85
+const REG_SLOPPINESS = 1.02 - REG_PROFICIENCY
 
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x)
 
@@ -480,15 +502,20 @@ const makeTracker = (numPlayers) => {
 
       for (const a of result.actions) {
         const s = a.seat
+        const preflop = a.street === 'preflop'
+        // AF is a postflop statistic: bets and raises over calls from the flop
+        // on. Counting preflop actions too welded it to PFR -- a LAG that opened
+        // fewer hands appeared to bet less after the flop, so the fit could not
+        // tighten its preflop game without being told it had turned passive.
         if (a.type === 'raise') {
-          stats[s].bets++
-          if (a.street === 'preflop') {
+          if (!preflop) stats[s].bets++
+          if (preflop) {
             raisedPre[s] = true
             voluntary[s] = true
           }
         } else if (a.type === 'call') {
-          stats[s].calls++
-          if (a.street === 'preflop') voluntary[s] = true
+          if (!preflop) stats[s].calls++
+          if (preflop) voluntary[s] = true
         } else if (a.type === 'fold') {
           stats[s].folds++
           if (a.street === 'preflop') foldedPre[s] = true
