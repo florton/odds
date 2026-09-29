@@ -30,6 +30,7 @@
 // would beg the question the simulation is supposed to answer.
 
 const { estimateEquity } = require('./texas-equity')
+const { evaluate, categoryOf } = require('./texas-eval')
 
 // ------------------------------------------------------------------ traits
 //
@@ -64,6 +65,16 @@ const PARAMS = {
   pullLooseness: 0.50,
   pullStickiness: 0.50,
   pullBluffiness: 0.50,
+
+  // Made-hand overvalue. Sticky players read a made hand as stronger than it
+  // is: a station calls down with any pair *and* bets it, which is why this
+  // lifts calls and bets together where a raw stickiness bias only lifts
+  // calls -- and calls alone drag AF below target while WTSD rises. It is a
+  // flat equity bonus postflop when holding a pair or better, scaled by how
+  // far stickiness sits from neutral. That scaling is also why it is zero
+  // at neutral: the stage-1 regulars sit at exactly 0.5 and cannot see it,
+  // so it is fitted with the personality scales rather than the value model.
+  handOvervalue: 0,
 
   // Fold equity: the floor, how much a bigger price buys, and how fast it
   // collapses for each time the pot has already been raised.
@@ -308,8 +319,12 @@ const applyTraits = (values, traits, equity, pot, tiltLevel, preflop) => {
     // could build was one that limped every hand as well -- 72% of them,
     // against the 45% a real station plays. Separating them lets a station be
     // what it actually is: ordinary before the flop, immovable after it.
+    // The per-archetype scale extends the reach of that immovability: the
+    // trait itself saturates at 0.98, so past it only the scale has any
+    // gradient to give.
     if (preflop) out.call += pot * (looseness - 0.5) * PARAMS.pullLooseness * 2
-    else out.call += pot * (traits.stickiness - 0.5) * PARAMS.pullStickiness * 2
+    else out.call += pot * (traits.stickiness - 0.5) * PARAMS.pullStickiness * 2 *
+      (traits.stickinessScale || 1)
   }
   if (out.check !== undefined) {
     // A passive player likes checking; an aggressive one dislikes it.
@@ -398,7 +413,18 @@ const makePlayer = (name, { traits = {}, proficiency = 0.5, rng = Math.random } 
       // Proficiency first degrades the read on the hand, before it is used
       // for anything. A weak player is not making good decisions noisily --
       // they are making decisions on a wrong number.
-      const equity = estimateEquity(v.holeCards, v.board, opponents, proficiency)
+      let equity = estimateEquity(v.holeCards, v.board, opponents, proficiency)
+      // Sticky players overvalue made hands -- a station calls down with any
+      // pair and bets it, which is why the bonus lifts both calls and bets
+      // where a raw stickiness bias only lifts calls. Symmetric about
+      // neutral: a non-sticky player undervalues the same hands.
+      if (v.board.length > 0 && PARAMS.handOvervalue !== 0) {
+        const made = categoryOf(evaluate(v.holeCards.concat(v.board))) >= 1
+        if (made) {
+          equity = Math.max(0, Math.min(1,
+            equity + PARAMS.handOvervalue * (t.stickiness - 0.5)))
+        }
+      }
       const base = actionValues(v, equity, opponents, t.sizing)
       const biased = applyTraits(base, t, equity, v.pot, player.tiltLevel,
         v.board.length === 0)
@@ -431,17 +457,21 @@ const makePlayer = (name, { traits = {}, proficiency = 0.5, rng = Math.random } 
 // Named points in the trait space. The names are a convenience for talking
 // about them; nothing downstream reads them, and in particular nothing a
 // strategy under test can see reveals which of these it is sitting against.
+// Every entry also carries stickinessScale, a per-archetype multiplier on the
+// global stickiness pull. One global pull cannot serve both the tag and the
+// calling station: the trait saturates at 0.98, which caps how far the bias
+// reaches, and a capped bias has no gradient left to fit with.
 const ARCHETYPES = {
-  nit: { aggression: 0.30, looseness: 0.12, stickiness: 0.35, bluffiness: 0.10, sizing: 0.5 },
-  rock: { aggression: 0.40, looseness: 0.25, stickiness: 0.40, bluffiness: 0.20, sizing: 0.5 },
-  tag: { aggression: 0.75, looseness: 0.35, stickiness: 0.35, bluffiness: 0.55, sizing: 0.65 },
-  lag: { aggression: 0.85, looseness: 0.65, stickiness: 0.40, bluffiness: 0.75, sizing: 0.75 },
-  station: { aggression: 0.15, looseness: 0.80, stickiness: 0.92, bluffiness: 0.10, sizing: 0.4 },
-  maniac: { aggression: 0.95, looseness: 0.90, stickiness: 0.50, bluffiness: 0.85, sizing: 0.9 },
-  bluffer: { aggression: 0.70, looseness: 0.55, stickiness: 0.30, bluffiness: 0.95, sizing: 0.8 },
+  nit: { aggression: 0.30, looseness: 0.12, stickiness: 0.35, bluffiness: 0.10, sizing: 0.5, stickinessScale: 1 },
+  rock: { aggression: 0.40, looseness: 0.25, stickiness: 0.40, bluffiness: 0.20, sizing: 0.5, stickinessScale: 1 },
+  tag: { aggression: 0.75, looseness: 0.35, stickiness: 0.35, bluffiness: 0.55, sizing: 0.65, stickinessScale: 1 },
+  lag: { aggression: 0.85, looseness: 0.65, stickiness: 0.40, bluffiness: 0.75, sizing: 0.75, stickinessScale: 1 },
+  station: { aggression: 0.15, looseness: 0.80, stickiness: 0.92, bluffiness: 0.10, sizing: 0.4, stickinessScale: 1 },
+  maniac: { aggression: 0.95, looseness: 0.90, stickiness: 0.50, bluffiness: 0.85, sizing: 0.9, stickinessScale: 1 },
+  bluffer: { aggression: 0.70, looseness: 0.55, stickiness: 0.30, bluffiness: 0.95, sizing: 0.8, stickinessScale: 1 },
   // Cocky is the interesting one: aggressive, and it tilts, so its personality
   // is not constant across a session even though its parameters are.
-  cocky: { aggression: 0.80, looseness: 0.60, stickiness: 0.45, bluffiness: 0.70, sizing: 0.8, tilt: 0.6 }
+  cocky: { aggression: 0.80, looseness: 0.60, stickiness: 0.45, bluffiness: 0.70, sizing: 0.8, tilt: 0.6, stickinessScale: 1 }
 }
 
 // The trait values above are starting guesses, not measurements. They and the
@@ -451,6 +481,11 @@ const ARCHETYPES = {
 // simply runs the pulls to their bounds. The pulls are therefore held fixed
 // and the traits are what gets fitted, by texas-calibrate.js, against the
 // behaviour each named type is supposed to exhibit.
+// The one fitted per-archetype exception is `stickinessScale`, which
+// multiplies the stickiness pull for that type alone. It escapes the
+// over-parameterisation argument precisely because the trait is bounded on
+// [0.02, 0.98]: the calling station saturates it, and once saturated the
+// trait has nothing left to give -- only the scale can reach further.
 const setArchetype = (kind, traits) => {
   ARCHETYPES[kind] = { ...ARCHETYPES[kind], ...traits }
 }

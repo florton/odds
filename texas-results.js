@@ -34,7 +34,7 @@ const fs = require('fs')
 const path = require('path')
 const { measure } = require('./texas')
 const { archetype, makePlayer } = require('./texas-players')
-const { FIELD_SKILL } = require('./texas-calibrate')
+const { fieldSkill } = require('./texas-calibrate')
 const { handIndex, handLabel } = require('./texas-equity')
 const { makeRng } = require('./texas-engine')
 
@@ -201,7 +201,7 @@ if (require.main === module) {
   {
     const rng = makeRng(303)
     const lineup = ['nit', 'tag', 'lag', 'station', 'maniac', 'tag']
-    const bots = lineup.map((k, i) => archetype(k, FIELD_SKILL[k], rng,
+    const bots = lineup.map((k, i) => archetype(k, fieldSkill(k), rng,
       k + (lineup.indexOf(k) !== i ? ' (2)' : '')))
     const { out, breakdown } = run(bots, HANDS, { seed: 33 })
     console.log('\n3. The realistic table -- types at their fitted proficiencies, no rake')
@@ -267,7 +267,8 @@ if (require.main === module) {
     saved.realistic = {
       hands: out.handsPlayed,
       showdownRate: out.showdownRate,
-      proficiency: FIELD_SKILL,
+      proficiency: Object.fromEntries(['nit', 'tag', 'lag', 'station', 'maniac']
+        .map((k) => [k, fieldSkill(k)])),
       players: rows,
       raked: { rake: rakeCfg, rakePer100PerSeat: rakePer100, players: rakeRows },
       positions,

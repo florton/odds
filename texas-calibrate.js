@@ -88,11 +88,16 @@ const FIELD_TARGETS = {
   maniac: { vpip: 62, pfr: 38, af: 2.4, wtsd: 36 }
 }
 
-// The proficiency each archetype is played at. Regulars are good at what they
-// do and the loose players are not, which is most of what separates them.
+// The starting proficiencies. The fit may move them per archetype via the
+// profile's `skill` key, which overrides these once written to
+// calibration.json; `fieldSkill` below resolves which of the two applies.
 const FIELD_SKILL = {
   nit: 0.70, tag: 0.85, lag: 0.80, station: 0.35, maniac: 0.25
 }
+
+const fieldSkill = (kind) => ARCHETYPES[kind].skill !== undefined
+  ? ARCHETYPES[kind].skill
+  : FIELD_SKILL[kind]
 
 // --------------------------------------------------------------- measuring
 
@@ -160,7 +165,7 @@ const measureArchetypes = (params, traits, hands, seed) => {
   const rng = makeRng(4321)
   const kinds = ['nit', 'tag', 'lag', 'station', 'maniac', 'tag']
   const players = kinds.map((k, i) =>
-    archetype(k, FIELD_SKILL[k], rng, k + i))
+    archetype(k, fieldSkill(k), rng, k + i))
   const { rows } = runField(players, hands, seed)
   const out = {}
   kinds.forEach((k, i) => {
@@ -236,6 +241,10 @@ const BOUNDS = {
   // half its target: the ceiling, not the stickiness trait, was what stopped
   // sticky players calling down. It needs real headroom.
   maxBias: [0.05, 2.5],
+  // Made-hand overvalue, scaled by a trait's distance from neutral, so the
+  // negative side lets tight types undervalue made hands and the positive
+  // side reaches ~+0.29 equity at the stickiness bound of 0.98.
+  handOvervalue: [-0.2, 0.6],
   futureCost: [0.0, 3.0],
   callShadePostBase: [0.0, 0.9]
 }
@@ -300,6 +309,19 @@ const search = (start, keys, evaluate, passes, label) => {
 // across all five and bought a good nit by wrecking the calling station.
 const TRAIT_KEYS = ['looseness', 'preflopAggression', 'aggression', 'stickiness', 'bluffiness']
 
+// The fitted profile is the traits plus the archetype's proficiency (`skill`,
+// stepped additively on its own bounds) plus the one trait scale.
+const ADDITIVE_KEYS = [...TRAIT_KEYS, 'skill']
+const KEY_BOUNDS = { skill: [0.05, 0.95] }   // per-key; default [0.02, 0.98]
+// stickinessScale multiplies the stickiness pull per archetype. The calling
+// station's WTSD target is unreachable through the trait alone -- it
+// saturates at 0.98 (~0.5 pots of bias where ~1.5 are needed) and a capped
+// bias has zero gradient, which is why the trait search stalls on it. The
+// scale is the minimal extra degree of freedom: it restores reach without
+// touching the four well-fitted types, whose scales should land near 1.
+const SCALE_KEYS = ['stickinessScale']
+const SCALE_BOUNDS = [0.25, 4.0]
+
 const archetypeError = (got) => {
   const per = {}
   let total = 0
@@ -319,23 +341,48 @@ const runTraitDescent = (startTraits, evaluate, passes, initialStep, label) => {
   console.log('  ' + label + ' start  error ' + bestErr.toFixed(5))
 
   // Same refinement as the parameter search: shrink the step instead of
-  // halting the moment a coarse pass fails.
+  // halting the moment a coarse pass fails. The additive keys and the scales
+  // refine together on that schedule, each honouring its own floor: 0.01 for
+  // trait steps, 0.02 for scale spans, as in the parameter search above.
   let step = initialStep
+  let scaleSpan = 0.45
   for (let pass = 0; pass < passes; pass++) {
     let improved = false
     for (const kind of Object.keys(FIELD_TARGETS)) {
-      for (const key of TRAIT_KEYS) {
-        for (const delta of [-step, -step / 2, step / 2, step]) {
-          const value = Math.max(0.02, Math.min(0.98, best[kind][key] + delta))
-          if (Math.abs(value - best[kind][key]) < 1e-9) continue
-          const candidate = JSON.parse(JSON.stringify(best))
-          candidate[kind][key] = value
-          const err = evaluate(candidate)
-          evals++
-          if (err < bestErr - 1e-9) {
-            bestErr = err
-            best = candidate
-            improved = true
+      if (step >= 0.01) {
+        for (const key of ADDITIVE_KEYS) {
+          const [lo, hi] = KEY_BOUNDS[key] || [0.02, 0.98]
+          for (const delta of [-step, -step / 2, step / 2, step]) {
+            const value = Math.max(lo, Math.min(hi, best[kind][key] + delta))
+            if (Math.abs(value - best[kind][key]) < 1e-9) continue
+            const candidate = JSON.parse(JSON.stringify(best))
+            candidate[kind][key] = value
+            const err = evaluate(candidate)
+            evals++
+            if (err < bestErr - 1e-9) {
+              bestErr = err
+              best = candidate
+              improved = true
+            }
+          }
+        }
+      }
+      if (scaleSpan >= 0.02) {
+        for (const key of SCALE_KEYS) {
+          for (const mult of [1 - scaleSpan, 1 - scaleSpan / 2,
+            1 + scaleSpan / 2, 1 + scaleSpan]) {
+            const value = Math.max(SCALE_BOUNDS[0], Math.min(SCALE_BOUNDS[1],
+              best[kind][key] * mult))
+            if (Math.abs(value - best[kind][key]) < 1e-9) continue
+            const candidate = JSON.parse(JSON.stringify(best))
+            candidate[kind][key] = value
+            const err = evaluate(candidate)
+            evals++
+            if (err < bestErr - 1e-9) {
+              bestErr = err
+              best = candidate
+              improved = true
+            }
           }
         }
       }
@@ -345,7 +392,8 @@ const runTraitDescent = (startTraits, evaluate, passes, initialStep, label) => {
       (improved ? '' : '   (refining)'))
     if (!improved) {
       step /= 2
-      if (step < 0.01) break
+      scaleSpan /= 2
+      if (step < 0.01 && scaleSpan < 0.02) break
     }
   }
   return { best, bestErr, evals }
@@ -361,12 +409,21 @@ const searchTraits = (startTraits, params, hands, seed, passes, starts = 3) => {
   const evaluate = (t) => archetypeError(measureArchetypes(params, t, hands, seed)).total
 
   // One start from the guesses as written, and two displaced from them, so the
-  // restarts explore rather than re-running the same descent.
+  // restarts explore rather than re-running the same descent. Traits and skill
+  // shift additively; the scales shift multiplicatively, up for a positive
+  // nudge and back down for a negative one.
   const nudge = (amount) => {
     const out = JSON.parse(JSON.stringify(startTraits))
     for (const kind of Object.keys(out)) {
-      for (const key of TRAIT_KEYS) {
-        out[kind][key] = Math.max(0.02, Math.min(0.98, out[kind][key] + amount))
+      for (const key of ADDITIVE_KEYS) {
+        const [lo, hi] = KEY_BOUNDS[key] || [0.02, 0.98]
+        out[kind][key] = Math.max(lo, Math.min(hi, out[kind][key] + amount))
+      }
+      for (const key of SCALE_KEYS) {
+        const value = amount >= 0
+          ? out[kind][key] * (1 + amount)
+          : out[kind][key] / (1 - amount)
+        out[kind][key] = Math.max(SCALE_BOUNDS[0], Math.min(SCALE_BOUNDS[1], value))
       }
     }
     return out
@@ -424,6 +481,14 @@ const reportArchetypes = (got) => {
   }
 }
 
+// Short labels for the fitted profile's keys, in the order the fit report
+// prints them: five traits, then proficiency, then the one trait scale.
+const PROFILE_LABELS = {
+  looseness: 'loos', preflopAggression: 'pref', aggression: 'aggr',
+  stickiness: 'stic', bluffiness: 'bluf', skill: 'skil',
+  stickinessScale: 'scal'
+}
+
 // ------------------------------------------------------- fitting, resumed
 //
 // The traits the archetypes currently hold: the starting guesses on a fresh
@@ -439,6 +504,16 @@ const currentTraits = () => {
         ? ARCHETYPES[kind][key]
         : ARCHETYPES[kind].aggression
     }
+    // The fitted profile is traits plus proficiency plus the one trait scale.
+    // skill and stickinessScale ride through setArchetype like any other key,
+    // so a fitted value lands in ARCHETYPES and reaches the players from
+    // there.
+    startTraits[kind].skill = ARCHETYPES[kind].skill !== undefined
+      ? ARCHETYPES[kind].skill
+      : FIELD_SKILL[kind]
+    startTraits[kind].stickinessScale = ARCHETYPES[kind].stickinessScale !== undefined
+      ? ARCHETYPES[kind].stickinessScale
+      : 1
   }
   return startTraits
 }
@@ -454,8 +529,11 @@ const currentTraits = () => {
 const fitPersonality = (paramStart, startTraits, hands, traitPasses, cycles) => {
   let s2 = searchTraits(startTraits, paramStart, hands, 8, traitPasses)
 
+  // handOvervalue moves only archetype evals, and only in proportion to a
+  // trait's distance from neutral -- the neutral regulars of stage 1 cannot
+  // see it, so that fit is untouched by construction.
   const stage3Keys = ['pullAggression', 'pullLooseness', 'pullStickiness',
-    'pullBluffiness', 'maxBias', 'temperatureCurve']
+    'pullBluffiness', 'maxBias', 'temperatureCurve', 'handOvervalue']
   let s3 = search(paramStart, stage3Keys, (p) =>
     archetypeError(measureArchetypes(p, s2.best, hands, 8)).total, 8, 'stage 3')
 
@@ -482,8 +560,8 @@ const finishFit = (baseline, s2, s3, startTraits, hands, started) => {
 
   console.log('\nArchetype traits')
   for (const kind of Object.keys(s2.best)) {
-    const parts = TRAIT_KEYS.map((k) =>
-      k.slice(0, 4) + ' ' + startTraits[kind][k].toFixed(2) + '->' +
+    const parts = Object.keys(PROFILE_LABELS).map((k) =>
+      PROFILE_LABELS[k] + ' ' + startTraits[kind][k].toFixed(2) + '->' +
       s2.best[kind][k].toFixed(2))
     console.log('  ' + kind.padEnd(9) + parts.join('  '))
   }
@@ -619,4 +697,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { REG_TARGETS, FIELD_TARGETS, FIELD_SKILL, measureRegs, measureArchetypes }
+module.exports = { REG_TARGETS, FIELD_TARGETS, FIELD_SKILL, fieldSkill, measureRegs, measureArchetypes }

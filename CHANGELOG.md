@@ -52,8 +52,84 @@ Final field, measured against deals the search never saw: nit 13.8/13, tag
 23.8/22, lag 34.2/32, maniac 59.6/62, and the station at 62.8/45 with WTSD
 28.2/42. The station's last two targets fight each other -- playing 45% of
 hands and showing down 42% of them asks the value model to accept prices it
-was fitted on the regulars to refuse -- and the fit picks one. That is now
-said in the README's Limitations instead of being chased further.
+was fitted on the regulars to refuse -- and the fit picks one. That went to
+the README's Limitations as the stopping point. The next entry took the chase
+back up.
+
+### One global scale cannot fit five types
+
+The resume escape put every VPIP within reach, but the station's WTSD stayed
+at 28.2 against 42 and its stickiness went back to the ceiling, 0.98. The
+argument for holding the pulls global -- halve every trait's distance from
+neutral and double the pull, same player -- has one hole: a trait bounded on
+[0.02, 0.98] saturates, and a saturated trait's bias can only grow through
+the pull. Saturated, the station was buying 0.48 x 0.56 x 2 = 0.54 pots of
+call bias, and WTSD 42 wants closer to twice that.
+
+Two per-archetype additions break the tie. `stickinessScale` multiplies one
+type's stickiness pull, searched on [0.25, 4]; `skill` frees the proficiency
+each type is fitted at, so the realistic table plays them where the fit put
+them rather than where they were hand-assigned. The joint refit took the
+objective from 0.038 to **0.0108** and the station to **51.2/45** VPIP with
+WTSD **32.8** -- VPIP error cut from +17.8 to +6.2, WTSD up from 28.2 --
+while everyone else stayed on target: nit 14.1/13, tag 22.1/22, lag 29.8/32,
+maniac 61.2/62. The fitted skills landed at nit .60, tag .75, lag .54,
+station .49, maniac .39: the station needed a steadier hand, not a louder
+bias -- at 0.35 its softmax was folding flops at random, and no bias survives
+its own coin flips. Held out on fresh seeds it holds: station 51.4/51.7 VPIP,
+WTSD 30.2/31.3 against the fit seed's 32.8, which is that statistic's usual
+wobble over 8,000 hands; VPIP and PFR stay within a point and a half
+everywhere.
+
+The residual the search would not eat says why it stopped where it did. The
+station's AF target is 0.6 and it sits at 0.5; stickiness only adds value to
+calls, so every showdown bought with more stickiness is paid for in
+bets-per-call. A real station calls down *and bets its made hands* -- its
+calls and bets rise together -- and that joint movement is exactly what a
+pure call bias cannot make. Giving the model a way to make it is the next
+entry.
+
+### The lever the fit declined
+
+The diagnosis pointed at AF: the station's WTSD climb kept dragging its
+bets-per-call below target, and a real station calls down *and* bets its
+made hands. So a `handOvervalue` parameter was built -- a flat equity bonus
+postflop when holding a pair or better, scaled by a trait's distance from
+neutral so the stage-1 regulars cannot see it (they sit at exactly 0.5), and
+fitted alongside the personality scales. A paired-seed probe confirmed it
+does what it claims: at 0.5, a station-like player's folds fall **9.3% ->
+5.1%** and its raises *rise* **8.3% -> 14.6%** on a made hand, while an
+ace-high view is bit-identical.
+
+The search tried it through every stage-3 pass and kept it at **0.000**. It
+had found a blunter instrument it liked better: raise the station's own
+aggression (0.10 -> 0.33) and skill (0.49 -> 0.63). The refit took the
+objective from 0.0108 to **0.00519** and the station to **49.5/45** with
+WTSD **37.9** and AF on target at 0.6; held out, it holds at 50.3/50.4 VPIP
+and WTSD 36.6-37.1. The cost, under the equal-weight objective, is the
+maniac: **67.8/62**, where the previous fit had it at 61.2. The parameter
+stays in the model at 0 -- fitted infrastructure the run turned out not to
+need, which is itself the finding: the AF bind was real, but it unbinds
+through the aggression trait long before it needs a new mechanism.
+
+### The table, re-measured
+
+Fitter stations move money. The 300,000-hand rerun (137s) finds the station
+at **−8.3 ± 6.1** bb/100 at the realistic table against **−152.0** before,
+and the LAG at **−35.0** against +90.8 -- that edge was never the LAG's own,
+it was the station's excess folds, and it closed when the leak did. The
+field compresses around two winning TAGs (+43.0, +18.5); the maniac still
+wins (+24.6, raked +16.2, no longer flipped negative by the rake). The skill
+ladder reproduces the previous run to the decimal -- neutral players never
+see the traits -- which is the harness agreeing with itself.
+
+Six of ten shape checks pass, against eight before, and the two new failures
+are the point. The station loses money but cannot prove it at three standard
+errors; a fitted station that bets its made hands is a marginal loser, and
+"the station clearly bleeds" was a symptom of the misfit, not a fact about
+stations. The top-five starting hands miss (AA KK QQ JJ 99, AKs sixth) is a
+coin flip: 99 +451 ± 44 over TT +430 ± 42. The maniac and TAG-gap failures
+carry over unchanged.
 
 ### The 300,000-hand results, and a maniac who wins
 

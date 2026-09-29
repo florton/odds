@@ -651,12 +651,12 @@ if (arg === '--players') {
   const hands = Math.max(1, Number(process.argv[3]) || 1)
   const seed = process.argv[4] !== undefined ? Number(process.argv[4]) : Date.now() >>> 0
   const { archetype } = require('./texas-players')
-  const { FIELD_SKILL } = require('./texas-calibrate')
+  const { fieldSkill } = require('./texas-calibrate')
   const rng = makeRng(seed)
   // The same lineup texas-results.js calls the realistic table: each type at
   // the proficiency it was fitted at, with a second tag in the last seat.
   const lineup = ['nit', 'tag', 'lag', 'station', 'maniac', 'tag']
-  const bots = lineup.map((k, i) => archetype(k, FIELD_SKILL[k], rng,
+  const bots = lineup.map((k, i) => archetype(k, fieldSkill(k), rng,
     k + (lineup.indexOf(k) !== i ? ' (2)' : '')))
   console.log('Watching ' + hands + ' hand' + (hands > 1 ? 's' : '') +
     '  --  ' + lineup.map((k, i) => k + (lineup.indexOf(k) !== i ? ' (2)' : '')).join('/') +

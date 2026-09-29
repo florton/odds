@@ -27,9 +27,10 @@ interesting engineering is about making those errors small enough to say somethi
   error bars by up to **29.7x**, and duplicate dealing cancels card luck.
 - **A Hold'em field fitted to real population statistics, then asked who wins.**
   Five archetypes whose constants are fitted until the simulated table
-  reproduces tracked VPIP/PFR/AF/WTSD; at the fitted table the calling station
-  loses **−152 bb/100**, and at fixed style every step of proficiency from
-  0.25 to 1.0 is worth more money than the one before.
+  reproduces tracked VPIP/PFR/AF/WTSD; at the fitted table the money is
+  nearly even -- two TAGs win, the calling station is a marginal loser -- and
+  at fixed style every step of proficiency from 0.25 to 1.0 is worth more
+  money than the one before.
 
 ## Quick start
 
@@ -160,20 +161,21 @@ only ±0.1 between them):
 
 | Type | VPIP | PFR | AF | WTSD |
 |---|---|---|---|---|
-| nit | 13.8 / 13 | 9.4 / 10 | 2.3 / 2.2 | 25.4 / 24 |
-| tag | 23.8 / 22 | 17.9 / 19 | 2.6 / 2.6 | 26.7 / 26 |
-| lag | 34.2 / 32 | 24.1 / 25 | 3.3 / 3.2 | 33.2 / 29 |
-| station | 62.8 / 45 | 7.6 / 6 | 0.5 / 0.6 | 28.2 / 42 |
-| maniac | 59.6 / 62 | 37.6 / 38 | 2.5 / 2.4 | 27.9 / 36 |
+| nit | 11.7 / 13 | 10.5 / 10 | 2.2 / 2.2 | 23.4 / 24 |
+| tag | 24.0 / 22 | 18.2 / 19 | 2.5 / 2.6 | 27.5 / 26 |
+| lag | 31.4 / 32 | 24.8 / 25 | 3.0 / 3.2 | 31.4 / 29 |
+| station | 49.5 / 45 | 5.8 / 6 | 0.6 / 0.6 | 37.9 / 42 |
+| maniac | 67.8 / 62 | 40.0 / 38 | 2.1 / 2.4 | 31.2 / 36 |
 
 *measured / target*
 
 The neutral regulars the value model was fitted on land at 23.9/17.2 VPIP/PFR
 against 22/18, aggression 2.5 on 2.5, WTSD 26.0 on 26, and 64% of hands end
-before a flop against a real ~60%. The one type the model cannot fully express
-is the calling station: playing 45% of hands and showing down 42% of them are
-targets that pull its looseness in opposite directions, and the fit resolves
-the conflict looser rather than tighter (see Limitations).
+before a flop against a real ~60%. The calling station -- the type every
+earlier fit failed -- now lands at 49.5/45 with AF on target and WTSD 37.9
+against 42, and holds on fresh seeds: 50.3/50.4 VPIP, WTSD 36.6-37.1. What is
+left -- station WTSD still 4 short, the maniac 6 VPIP loose -- is said plainly
+in Limitations.
 
 ### Who wins
 
@@ -186,15 +188,15 @@ only difference between them is style:
 
 | Player | bb/100 | ± SE |
 |---|---|---|
-| maniac | +126.6 | 7.9 |
-| neutral | +3.7 | 5.2 |
-| lag | −15.4 | 6.4 |
-| nit | −16.3 | 2.6 |
-| tag | −36.5 | 4.2 |
-| station | −62.1 | 7.9 |
+| maniac | +130.1 | 7.8 |
+| neutral | −5.1 | 4.9 |
+| lag | −13.9 | 5.1 |
+| tag | −26.1 | 4.3 |
+| nit | −26.6 | 2.0 |
+| station | −58.5 | 6.6 |
 
 Loose-aggressive styles win at equal execution and passive ones pay for them;
-45% of hands reach showdown. The honest caveat: this is what the *fitted*
+34.5% of hands reach showdown. The honest caveat: this is what the *fitted*
 styles do -- the fit constrained how often they act, not how profitably, and
 the fitted maniac is sticky rather than bluffy, which at high proficiency
 plays like a strong LAG rather than a lottery player (see Limitations).
@@ -211,33 +213,38 @@ worst; one proficiency step is worth roughly 20 bb/100 around the middle of
 the ladder.
 
 **3. The realistic table.** The fitted types at the proficiencies they were
-fitted at (nit .70, tag .85, lag .80, station .35, maniac .25), no rake:
+fitted at (nit .70, tag .85, lag .64, station .63, maniac .49), no rake:
 
 | Player | bb/100 | ± SE |
 |---|---|---|
-| lag | +90.8 | 5.9 |
-| tag (2) | +47.2 | 4.3 |
-| maniac | +24.2 | 6.7 |
-| tag | +19.6 | 4.1 |
-| nit | −29.8 | 2.9 |
-| station | −152.0 | 6.0 |
+| tag (2) | +43.0 | 4.4 |
+| maniac | +24.6 | 7.0 |
+| tag | +18.5 | 4.1 |
+| station | −8.3 | 6.1 |
+| lag | −35.0 | 5.1 |
+| nit | −42.9 | 2.4 |
 
-The same table raked 5% capped at 3bb costs each seat **17.1 bb/100**; it
-flips the maniac negative (−26.0) and squeezes everyone but the loosest
-winners. The money the station loses goes somewhere: here it funds the three
-aggressive styles.
+The same table raked 5% capped at 3bb costs each seat **16.9 bb/100**: tag (2)
++27.0, maniac +16.2, tag +7.9, nit −46.0, lag −47.0, station −59.9. The
+earlier version of this table had the station losing −152 bb/100 and the lag
+winning +90.8; closing the station's over-folding leak removed the money both
+numbers were made of, and the field's edges compress to a few bb/100 around
+two winning TAGs.
 
 **4. Where the money comes from.** The button is the most profitable seat
-(+148.9 bb/100) and both blinds lose (SB −106.2, BB −73.5); later position
+(+136.5 bb/100) and both blinds lose (SB −110.4, BB −80.4); later position
 earns more, CO > HJ > UTG; aces are the most profitable starting hand
-(+1112 bb/100 when dealt) and the top five are AA KK QQ JJ TT. Everyone loses
+(+1015 bb/100 when dealt) and the top five are AA KK QQ JJ 99. Everyone loses
 from the blinds, and the station loses from every seat, worst of all the small
-blind (−269 bb/100).
+blind (−123 bb/100).
 
-Eight of the ten shape checks pass. The two that fail: the maniac's win rate
-is genuinely above zero in this lineup (+24.2 ± 6.7), and the TAG does not
-clearly out-earn him -- the gap, 4.6 bb/100, is under one standard error.
-Both are reported in Limitations rather than hidden.
+Six of the ten shape checks pass. The four that fail, reported here and in
+Limitations rather than hidden: the top five starting hands are AA KK QQ JJ
+99, with 99 vs TT a coin flip (+451 ± 44 against +430 ± 42) and AKs sixth;
+the calling station's win rate is negative but does not clear the three-
+standard-error bar (−8.3 ± 6.1); the maniac's win rate is genuinely above
+zero (+24.6 ± 7.0); and a TAG does not clearly out-earn him, though the TAG
+does clearly beat the station (a 26.8 bb/100 gap against 22.1 needed).
 
 ## Measuring honestly
 
@@ -263,22 +270,30 @@ attempt without it failed:
 
 ## Limitations
 
-**Hold'em.** The calling station is only half-fitted: the model can play 45% of
-hands or show down 42% of them, but not both, because calling wide enough
-preflop for the first and calling down often enough postflop for the second
-asks the value model to accept prices it was fitted -- on the regulars -- to
-refuse. The fit resolves the conflict at 62.8 VPIP / 28.2 WTSD. Behavioural
-targets do not pin down win rate, either: they constrain how often a type
-acts, not how profitably, and the fitted maniac -- sticky rather than bluffy --
-wins at equal skill and at the realistic table where a real one would bleed.
-The traits and pulls are a coordinate-descent optimum, so the answer depends
-on the path: two parameters (maxBias, pullStickiness) sat at values that made
-further improvement impossible until lifted off them mid-fit
-(`node texas-calibrate.js --resume`), which is also the honest record of why
-the search stopped where it did. Each player has one sizing habit and no
-concept of balance, adaptation or exploitation, and the game is cash-only: no
-tournaments, buy-ins or ICM, so "stakes" enter only through the fitted
-constants and the rake settings.
+**Hold'em.** The calling station is fitted now, but not for free. It lands at
+49.5/45 with WTSD 37.9 against 42, and getting there required the fit to make
+it bet: aggression from 0.10 to 0.33, bluffiness from 0.22 to 0.57, and a
+steadier hand (skill 0.63, fitted, now above the maniac's 0.49 -- a
+WTSD-42 calling station cannot be noisy in this model, because noise folds
+hands). A station that bets its made hands stops being a cash source: at the
+realistic table it is a marginal loser whose rate (−8.3 ± 6.1) does not clear
+the three-standard-error bar the shape checks demand. The WTSD residual
+(−4.1) and the price paid for the improvement -- the maniac traded loose,
+67.8/62 -- are left in the tables above rather than smoothed over, which is
+the honest record of an equal-weight objective. Behavioural targets do not
+pin down win rate, either: they constrain how often a type acts, not how
+profitably, and the fitted maniac -- sticky rather than bluffy -- wins at
+equal skill (+130.1) and at the realistic table (+24.6) where a real one
+would bleed. The old LAG figure is the same lesson from the other side:
++90.8 bb/100 was funded by the station's excess folds and collapsed to
+−35.0 the moment the leak closed. The traits and pulls are a
+coordinate-descent optimum, so the answer depends on the path: two parameters
+(maxBias, pullStickiness) sat at values that made further improvement
+impossible until lifted off them mid-fit (`node texas-calibrate.js --resume`),
+and the maniac overshoot is the latest instance of the same myopia. Each
+player has one sizing habit and no concept of balance, adaptation or
+exploitation, and the game is cash-only: no tournaments, buy-ins or ICM, so
+"stakes" enter only through the fitted constants and the rake settings.
 
 **Blackjack.** Two solver cells still disagree with published strategy (soft 12 and 13 v
 5, both marginal doubles). Splits are barely modelled. The counter varies only its bet,
