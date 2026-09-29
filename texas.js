@@ -1,6 +1,8 @@
 // Texas Hold'em -- table driver and measurement harness.
 //
 //   node texas.js                     deal one hand and print it
+//   node texas.js --watch [n] [seed]  watch n hands dealt to the fitted personalities
+//   node texas.js --players           the personality field's stats over 40k hands
 //   node texas.js 100000              measure a lineup over 100,000 hands
 //   node texas.js 100000 --paired     the same, with duplicate dealing
 //   node texas.js --test              engine invariants
@@ -645,6 +647,35 @@ const runPlayers = (hands) => {
 
 if (arg === '--players') {
   runPlayers(Number(process.argv[3]) || 40000)
+} else if (arg === '--watch') {
+  const hands = Math.max(1, Number(process.argv[3]) || 1)
+  const seed = process.argv[4] !== undefined ? Number(process.argv[4]) : Date.now() >>> 0
+  const { archetype } = require('./texas-players')
+  const { FIELD_SKILL } = require('./texas-calibrate')
+  const rng = makeRng(seed)
+  // The same lineup texas-results.js calls the realistic table: each type at
+  // the proficiency it was fitted at, with a second tag in the last seat.
+  const lineup = ['nit', 'tag', 'lag', 'station', 'maniac', 'tag']
+  const bots = lineup.map((k, i) => archetype(k, FIELD_SKILL[k], rng,
+    k + (lineup.indexOf(k) !== i ? ' (2)' : '')))
+  console.log('Watching ' + hands + ' hand' + (hands > 1 ? 's' : '') +
+    '  --  ' + lineup.map((k, i) => k + (lineup.indexOf(k) !== i ? ' (2)' : '')).join('/') +
+    ' at their fitted proficiencies, 6-max 1/2, 100bb, no rake  (seed ' + seed + ')')
+  for (let h = 0; h < hands; h++) {
+    console.log('')
+    const res = playHand({
+      bots,
+      stacks: new Array(bots.length).fill(200),
+      button: h % bots.length,
+      smallBlind: 1,
+      bigBlind: 2,
+      rng,
+      log: (s) => console.log(s)
+    })
+    for (let s = 0; s < bots.length; s++) {
+      if (bots[s].observe) bots[s].observe(res, s)
+    }
+  }
 } else if (arg === '--test') {
   process.exit(runTests() === 0 ? 0 : 1)
 } else if (arg && Number(arg)) {

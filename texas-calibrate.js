@@ -38,6 +38,10 @@
 //   node texas-calibrate.js            fit and write calibration.json
 //   node texas-calibrate.js --check    report the current fit without changing it
 //   node texas-calibrate.js --noise    show the noise floor of the objective
+//   node texas-calibrate.js --resume [param=value ...]
+//                                      continue the fit from calibration.json
+//                                      without re-running stage 1, optionally
+//                                      lifting a parameter off its bound first
 
 const fs = require('fs')
 const path = require('path')
@@ -215,20 +219,23 @@ const errorAgainst = (got, targets) => {
 // 89% of hands.
 const BOUNDS = {
   pullAggression: [0.02, 2.0],
-  pullLooseness: [0.02, 2.0],
+  pullLooseness: [0.02, 3.0],
   pullStickiness: [0.02, 2.0],
   pullBluffiness: [0.02, 2.0],
   foldBase: [0.0, 0.6],
   foldSlope: [0.05, 1.5],
   stubbornness: [0.05, 0.95],
-  callShadePre: [0.0, 3.0],
+  callShadePre: [0.0, 4.0],
   callShadePost: [0.0, 0.99],
   raiseShade: [0.0, 0.99],
   temperature: [0.05, 6.0],
   temperatureCurve: [0.05, 2.0],
   pullPosition: [0.02, 1.20],
   positionPostWeight: [0.0, 1.0],
-  maxBias: [0.05, 1.2],
+  // The 2026-09 refit pinned this at 1.2 with the calling station's WTSD still
+  // half its target: the ceiling, not the stickiness trait, was what stopped
+  // sticky players calling down. It needs real headroom.
+  maxBias: [0.05, 2.5],
   futureCost: [0.0, 3.0],
   callShadePostBase: [0.0, 0.9]
 }
@@ -417,6 +424,132 @@ const reportArchetypes = (got) => {
   }
 }
 
+// ------------------------------------------------------- fitting, resumed
+//
+// The traits the archetypes currently hold: the starting guesses on a fresh
+// fit, the fitted values on a resumed one.
+const currentTraits = () => {
+  const startTraits = {}
+  for (const kind of Object.keys(FIELD_TARGETS)) {
+    startTraits[kind] = {}
+    for (const key of TRAIT_KEYS) {
+      // A type that has never had its preflop aggression fitted starts from
+      // its single aggression value, which is what it was playing with.
+      startTraits[kind][key] = ARCHETYPES[kind][key] !== undefined
+        ? ARCHETYPES[kind][key]
+        : ARCHETYPES[kind].aggression
+    }
+  }
+  return startTraits
+}
+
+// Stages 2 and 3, alternating, because neither alone stays fitted: stage 2
+// fits the traits against whatever the pulls currently are; stage 3 then
+// moves the pulls, which invalidates the traits it was just handed. Neither
+// stage can touch the table of regulars, because both only move things that
+// are multiplied by a trait's distance from neutral, and the regulars sit at
+// neutral -- so the stage 1 fit stays intact throughout. Shared by a fresh
+// fit (starting from the stage 1 value model) and --resume (starting from the
+// current calibration.json).
+const fitPersonality = (paramStart, startTraits, hands, traitPasses, cycles) => {
+  let s2 = searchTraits(startTraits, paramStart, hands, 8, traitPasses)
+
+  const stage3Keys = ['pullAggression', 'pullLooseness', 'pullStickiness',
+    'pullBluffiness', 'maxBias', 'temperatureCurve']
+  let s3 = search(paramStart, stage3Keys, (p) =>
+    archetypeError(measureArchetypes(p, s2.best, hands, 8)).total, 8, 'stage 3')
+
+  for (let cycle = 2; cycle <= cycles; cycle++) {
+    console.log('\nStage 2/3 cycle ' + cycle + ': re-fitting traits against the new scales')
+    const again = searchTraits(s2.best, s3.best, hands, 8, 4, 1)
+    if (again.bestErr < s3.bestErr - 1e-9) s2 = again
+    s3 = search(s3.best, stage3Keys, (p) =>
+      archetypeError(measureArchetypes(p, s2.best, hands, 8)).total, 6,
+      'stage 3 cycle ' + cycle)
+  }
+  return { s2, s3 }
+}
+
+// Everything after the search converges: report the fit, flag parameters
+// resting on a bound, and write calibration.json.
+const finishFit = (baseline, s2, s3, startTraits, hands, started) => {
+  setParams(s3.best)
+  console.log('\nAfter:')
+  const afterRegs = measureRegs(s3.best, hands, 7)
+  reportRegs(afterRegs)
+  const afterArch = measureArchetypes(s3.best, s2.best, hands, 8)
+  reportArchetypes(afterArch)
+
+  console.log('\nArchetype traits')
+  for (const kind of Object.keys(s2.best)) {
+    const parts = TRAIT_KEYS.map((k) =>
+      k.slice(0, 4) + ' ' + startTraits[kind][k].toFixed(2) + '->' +
+      s2.best[kind][k].toFixed(2))
+    console.log('  ' + kind.padEnd(9) + parts.join('  '))
+  }
+
+  console.log('\nParameters')
+  let atBound = 0
+  for (const k of Object.keys(s3.best)) {
+    const from = baseline[k]
+    const to = s3.best[k]
+    // A parameter resting on its bound means the search wanted to go further
+    // and was not allowed to. That is not a converged fit, it is a
+    // constrained one, and it usually says the model is missing a term
+    // rather than that the constant is wrong.
+    const b = BOUNDS[k]
+    const pinned = b && (Math.abs(to - b[0]) < 1e-9 || Math.abs(to - b[1]) < 1e-9)
+    if (pinned) atBound++
+    console.log('  ' + k.padEnd(16) + from.toFixed(3).padStart(7) + ' -> ' +
+      to.toFixed(3).padStart(7) +
+      (pinned ? '   AT BOUND' : (Math.abs(to - from) > 1e-9 ? '' : '   (unchanged)')))
+  }
+  if (atBound > 0) {
+    console.log('  ' + atBound + ' parameter(s) pinned to a bound -- the fit is')
+    console.log('  constrained rather than converged.')
+  }
+
+  fs.writeFileSync(OUT_FILE, JSON.stringify({
+    params: s3.best,
+    archetypes: s2.best,
+    targets: { regulars: REG_TARGETS, field: FIELD_TARGETS },
+    fitted: { regulars: afterRegs, field: afterArch },
+    hands,
+    generated: new Date().toISOString()
+  }, null, 2))
+  console.log('\nWrote calibration.json in ' +
+    ((Date.now() - started) / 1000).toFixed(0) + 's')
+}
+
+// Continue a fit from the current calibration.json without re-running stage
+// 1. Optional key=value arguments lift parameters to new starting values
+// first -- the escape hatch for a parameter pinned on its bound, where no
+// single-coordinate move improves. Raising the ceiling alone frees a bias
+// that was capped at it, after which the trait stage can walk the trait back
+// down; the search could not reach that joint move one coordinate at a time.
+const resumeFit = (hands, args) => {
+  const overrides = {}
+  for (const kv of args) {
+    const m = kv.match(/^([A-Za-z]+)=([\d.eE+-]+)$/)
+    if (!m) continue // the hands count sits in the same argv slice
+    if (!(m[1] in BOUNDS)) {
+      console.error('usage: node texas-calibrate.js --resume [' +
+        Object.keys(BOUNDS).join('|') + ']=number ...')
+      process.exit(2)
+    }
+    overrides[m[1]] = clampParam(m[1], Number(m[2]))
+  }
+
+  const started = Date.now()
+  const baseline = { ...PARAMS, ...overrides }
+  const startTraits = currentTraits()
+  console.log('Resuming from calibration.json' +
+    (Object.keys(overrides).length ? '  overrides ' + JSON.stringify(overrides) : ''))
+
+  const { s2, s3 } = fitPersonality(baseline, startTraits, hands, 5, 3)
+  finishFit(baseline, s2, s3, startTraits, hands, started)
+}
+
 // --------------------------------------------------------------------- main
 
 if (require.main === module) {
@@ -445,6 +578,8 @@ if (require.main === module) {
     reportArchetypes(measureArchetypes({ ...PARAMS }, null, HANDS, 8))
     console.log('\nParameters in force:')
     console.log('  ' + JSON.stringify(PARAMS))
+  } else if (mode === '--resume') {
+    resumeFit(HANDS, process.argv.slice(3))
   } else {
     const started = Date.now()
     const baseline = { ...PARAMS }
@@ -465,115 +600,22 @@ if (require.main === module) {
     const s1 = search(baseline, stage1Keys,
       (p) => errorAgainst(measureRegs(p, HANDS, 7), REG_TARGETS), 12, 'stage 1')
 
-    // Stage two. With the value model fixed, move each named type's traits
-    // until it behaves the way that type is supposed to.
+    // Stages two and three: move each named type's traits until it behaves
+    // the way that type is supposed to, then fit how hard the traits pull,
+    // alternating. Stage three exists because a trait can saturate its [0,1]
+    // range while still losing to the value model's charges -- the calling
+    // station saturates, which is what makes the pull identifiable only after
+    // the traits have taken up all the slack they can. The temperature curve
+    // belongs there too, for the same structural reason: it pivots on the
+    // regulars' proficiency, so it moves every player except the ones stage 1
+    // was fitted on. Run in a single pass it pushed pullLooseness from 0.5 to
+    // 1.21 and left the LAG archetype -- whose traits were fitted for 0.5 --
+    // playing 59.6% of hands against a target of 32.
     console.log('\nStage 2: the archetype traits, against a mixed field')
-    const startTraits = {}
-    for (const kind of Object.keys(FIELD_TARGETS)) {
-      startTraits[kind] = {}
-      for (const key of TRAIT_KEYS) {
-        // A type that has never had its preflop aggression fitted starts from
-        // its single aggression value, which is what it was playing with.
-        startTraits[kind][key] = ARCHETYPES[kind][key] !== undefined
-          ? ARCHETYPES[kind][key]
-          : ARCHETYPES[kind].aggression
-      }
-    }
-    let s2 = searchTraits(startTraits, s1.best, HANDS, 8, 5)
+    const startTraits = currentTraits()
+    const { s2, s3 } = fitPersonality(s1.best, startTraits, HANDS, 5, 3)
 
-    // Stage three: how hard the traits pull, with the traits themselves fixed.
-    //
-    // These were held out of the fit because a pull and a trait are the same
-    // degree of freedom -- doubling one and halving the other gives an
-    // identical player. That argument holds only while the traits are free to
-    // move, though, and they are bounded on [0.02, 0.98]. Once a trait
-    // saturates the pull becomes genuinely identifiable, and the calling
-    // station saturates: its stickiness fitted to 0.98 and its showdown rate
-    // still came out at 23.8 against a target of 42, because a maxed trait
-    // could not outweigh what the value model was charging for a call.
-    //
-    // So they are fitted here, last, and only after the traits have taken up
-    // all the slack they can.
-    console.log('\nStage 3: the trait scales, with the traits fixed')
-    //
-    // The temperature curve belongs here too, for the same structural reason:
-    // it pivots on the regulars' proficiency, so it moves every player except
-    // the ones stage 1 was fitted on. It exists because the calling station
-    // was not missing its showdown target for want of stickiness. Played at
-    // proficiency 0.35 its softmax was hot enough to fold flops at random and
-    // raise hands at random -- WTSD 19, PFR 12 -- and the same traits at 0.85
-    // gave WTSD 40 and PFR 0.1. No trait scale can fix noise.
-    const stage3Keys = ['pullAggression', 'pullLooseness', 'pullStickiness',
-      'pullBluffiness', 'maxBias', 'temperatureCurve']
-
-    // Stages 2 and 3 have to alternate rather than run once each. Stage 2 fits
-    // the traits against whatever the pulls currently are; stage 3 then moves
-    // the pulls, which invalidates the traits it was just handed. Run in a
-    // single pass it pushed pullLooseness from 0.5 to 1.21 and left the LAG
-    // archetype -- whose traits were fitted for 0.5 -- playing 59.6% of hands
-    // against a target of 32.
-    //
-    // Neither stage can touch the table of regulars, because both only move
-    // things that are multiplied by a trait's distance from neutral, and the
-    // regulars sit at neutral. So the stage 1 fit stays intact throughout.
-    let s3 = search(s1.best, stage3Keys, (p) =>
-      archetypeError(measureArchetypes(p, s2.best, HANDS, 8)).total, 8, 'stage 3')
-
-    for (let cycle = 2; cycle <= 3; cycle++) {
-      console.log('\nStage 2/3 cycle ' + cycle + ': re-fitting traits against the new scales')
-      const again = searchTraits(s2.best, s3.best, HANDS, 8, 4, 1)
-      if (again.bestErr < s3.bestErr - 1e-9) s2 = again
-      s3 = search(s3.best, stage3Keys, (p) =>
-        archetypeError(measureArchetypes(p, s2.best, HANDS, 8)).total, 6,
-        'stage 3 cycle ' + cycle)
-    }
-
-    setParams(s3.best)
-    console.log('\nAfter:')
-    const afterRegs = measureRegs(s3.best, HANDS, 7)
-    reportRegs(afterRegs)
-    const afterArch = measureArchetypes(s3.best, s2.best, HANDS, 8)
-    reportArchetypes(afterArch)
-
-    console.log('\nArchetype traits')
-    for (const kind of Object.keys(s2.best)) {
-      const parts = TRAIT_KEYS.map((k) =>
-        k.slice(0, 4) + ' ' + startTraits[kind][k].toFixed(2) + '->' +
-        s2.best[kind][k].toFixed(2))
-      console.log('  ' + kind.padEnd(9) + parts.join('  '))
-    }
-
-    console.log('\nParameters')
-    let atBound = 0
-    for (const k of Object.keys(s3.best)) {
-      const from = baseline[k]
-      const to = s3.best[k]
-      // A parameter resting on its bound means the search wanted to go further
-      // and was not allowed to. That is not a converged fit, it is a
-      // constrained one, and it usually says the model is missing a term
-      // rather than that the constant is wrong.
-      const b = BOUNDS[k]
-      const pinned = b && (Math.abs(to - b[0]) < 1e-9 || Math.abs(to - b[1]) < 1e-9)
-      if (pinned) atBound++
-      console.log('  ' + k.padEnd(16) + from.toFixed(3).padStart(7) + ' -> ' +
-        to.toFixed(3).padStart(7) +
-        (pinned ? '   AT BOUND' : (Math.abs(to - from) > 1e-9 ? '' : '   (unchanged)')))
-    }
-    if (atBound > 0) {
-      console.log('  ' + atBound + ' parameter(s) pinned to a bound -- the fit is')
-      console.log('  constrained rather than converged.')
-    }
-
-    fs.writeFileSync(OUT_FILE, JSON.stringify({
-      params: s3.best,
-      archetypes: s2.best,
-      targets: { regulars: REG_TARGETS, field: FIELD_TARGETS },
-      fitted: { regulars: afterRegs, field: afterArch },
-      hands: HANDS,
-      generated: new Date().toISOString()
-    }, null, 2))
-    console.log('\nWrote calibration.json in ' +
-      ((Date.now() - started) / 1000).toFixed(0) + 's')
+    finishFit(baseline, s2, s3, startTraits, HANDS, started)
   }
 }
 

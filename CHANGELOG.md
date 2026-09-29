@@ -12,6 +12,73 @@ could not be right.
 
 ## Unreleased: finishing the Hold'em player model
 
+### The constants were fitted for a different model
+
+The field was too loose -- LAG 51.8 VPIP against a target of 32, station 61.7
+against 45, maniac 71.3 against 62 -- and the reason was not any constant but
+the file they lived in. `calibration.json` was written on 4 September, before
+aggression split by street and before looseness and stickiness moved to their
+own streets. Loaded into the new model, looseness values that had covered a
+whole game now acted only before the flop, and everyone loose played far too
+wide. Nothing was wrong with the search; it had honestly fitted a model that
+no longer existed.
+
+Refitting the current model took the objective from 0.25 to 0.023 and the
+regulars to 23.9 VPIP / 2.5 AF / 26.0 WTSD against targets of 22 / 2.5 / 26.
+The fit is stable across held-out seeds -- VPIP moves ±0.1 between them, and
+the noise floor is the same ±0.1, so nothing below survives being re-measured
+on fresh deals.
+
+### A capped bias has no gradient
+
+Two parameters pinned at their bounds, and the pins were load-bearing. With
+`maxBias` at 1.2 the station's preflop call bias ran into the ceiling -- and a
+trait whose bias is capped has zero gradient, so no single-coordinate move can
+improve anything. Coordinate descent declares the fit done while the trait is
+still unidentifiable. The tell is a trait parked near saturation while its
+statistic sits far from target.
+
+The escape is `--resume`, a new mode that continues the stage 2/3 cycles from
+the current `calibration.json` without re-running stage 1, and accepts
+`param=value` overrides to lift a parameter off its bound first. Lifting
+`maxBias` to 2 freed the capped bias so the trait stage could walk it down --
+which fixed the maniac. Lifting `pullStickiness` to 0.6 re-organised the whole
+calling response and let the search walk `pullLooseness` from 1.96 down to
+1.30, which is what finally landed the LAG at 34.2 against 32. Bounds on
+`maxBias`, `callShadePre` and `pullLooseness` were widened after the first
+refit pinned them; none of the final values rest on a bound.
+
+Final field, measured against deals the search never saw: nit 13.8/13, tag
+23.8/22, lag 34.2/32, maniac 59.6/62, and the station at 62.8/45 with WTSD
+28.2/42. The station's last two targets fight each other -- playing 45% of
+hands and showing down 42% of them asks the value model to accept prices it
+was fitted on the regulars to refuse -- and the fit picks one. That is now
+said in the README's Limitations instead of being chased further.
+
+### The 300,000-hand results, and a maniac who wins
+
+`results.json` was a 3,000-hand placeholder whose realism checks failed on
+noise, and the README's results sections were still comment markers. The full
+run (141 seconds) now fills both. The realistic table: lag **+90.8** bb/100,
+two TAGs at +47.2 and +19.6, maniac +24.2, nit −29.8, station **−152.0**. A
+5% rake capped at 3bb costs each seat 17.1 bb/100 and flips the maniac
+negative. Eight of ten shape checks pass: button most profitable, both blinds
+losing, position ordering, aces on top, the station clearly a loser.
+
+The two failures are reported rather than hidden. The maniac genuinely wins in
+this lineup (+24.2 ± 6.7), and the TAG does not clearly out-earn him. The
+fitted maniac is sticky rather than bluffy -- behavioural targets constrain
+how often a type acts, not how profitably -- so at the table it plays like a
+LAG that started too many hands, not like a lottery player. Fixing that means
+fitting to win rate, which is the expensive signal this whole design avoids.
+
+### Watching a hand
+
+`node texas.js --watch [n] [seed]` deals n hands to the fitted lineup
+(nit/tag/lag/station/maniac/tag at their fitted proficiencies, 100bb, no rake,
+button rotating) and prints every street. Two engine log lines that printed
+names unpadded now pad to match the rest, so the fitted names align.
+
 ### Six times faster, same answers
 
 Profiling a calibration check showed the hand evaluator taking 75% of all runtime, almost

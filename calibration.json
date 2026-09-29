@@ -1,52 +1,58 @@
 {
   "params": {
-    "pullAggression": 0.9880390625000001,
-    "pullLooseness": 1.2103478515625001,
-    "pullStickiness": 0.39177511411361704,
-    "pullBluffiness": 0.5957616692352297,
-    "foldBase": 0.1580404387084961,
+    "pullAggression": 0.7633074549942017,
+    "pullLooseness": 1.2961094219863851,
+    "pullStickiness": 0.5624531249999999,
+    "pullBluffiness": 0.7527528906015495,
+    "foldBase": 0.1584793713331904,
     "foldSlope": 0.6737500000000001,
-    "stubbornness": 0.754351171875,
-    "callShadePre": 2.357385817023,
-    "callShadePost": 0.2213005468948014,
-    "raiseShade": 0.55125,
-    "callShadePostBase": 0.4449122449253081,
-    "futureCost": 0.5075,
-    "temperature": 1.47,
-    "pullPosition": 0.7993125,
-    "positionPostWeight": 0.476984375,
-    "maxBias": 1.065
+    "stubbornness": 0.4809875391580878,
+    "callShadePre": 3.4756607666015626,
+    "callShadePost": 0.052384645260392146,
+    "raiseShade": 0.67528125,
+    "callShadePostBase": 0.2997596250184264,
+    "futureCost": 0.10631930447177246,
+    "temperature": 1.6994578125,
+    "temperatureCurve": 0.5760967041015623,
+    "pullPosition": 0.54977712890625,
+    "positionPostWeight": 0.5475675143445587,
+    "maxBias": 2
   },
   "archetypes": {
     "nit": {
-      "looseness": 0.11,
-      "aggression": 0.3,
-      "stickiness": 0.47,
-      "bluffiness": 0.02
+      "looseness": 0.25499999999999995,
+      "preflopAggression": 0.27999999999999997,
+      "aggression": 0.4350000000000001,
+      "stickiness": 0.515,
+      "bluffiness": 0.13499999999999995
     },
     "tag": {
-      "looseness": 0.47,
-      "aggression": 0.57,
-      "stickiness": 0.16999999999999998,
-      "bluffiness": 0.49000000000000005
+      "looseness": 0.45000000000000007,
+      "preflopAggression": 0.61,
+      "aggression": 0.43,
+      "stickiness": 0.34,
+      "bluffiness": 0.45
     },
     "lag": {
-      "looseness": 0.65,
-      "aggression": 0.73,
-      "stickiness": 0.37,
-      "bluffiness": 0.69
+      "looseness": 0.55,
+      "preflopAggression": 0.6099999999999999,
+      "aggression": 0.59,
+      "stickiness": 0.6300000000000001,
+      "bluffiness": 0.9699999999999999
     },
     "station": {
-      "looseness": 0.92,
-      "aggression": 0.02,
-      "stickiness": 0.98,
-      "bluffiness": 0.02
+      "looseness": 0.9400000000000001,
+      "preflopAggression": 0.02,
+      "aggression": 0.08000000000000002,
+      "stickiness": 0.9349999999999999,
+      "bluffiness": 0.14
     },
     "maniac": {
-      "looseness": 0.8400000000000001,
-      "aggression": 0.95,
-      "stickiness": 0.32,
-      "bluffiness": 0.82
+      "looseness": 0.6600000000000001,
+      "preflopAggression": 0.78,
+      "aggression": 0.69,
+      "stickiness": 0.8650000000000001,
+      "bluffiness": 0.18500000000000003
     }
   },
   "targets": {
@@ -92,50 +98,50 @@
   },
   "fitted": {
     "regulars": {
-      "vpip": 23.860416666666666,
-      "pfr": 16.35625,
-      "af": 2.5664034301467087,
-      "wtsd": 26.456289128810795,
-      "endsPreflop": 60.150000000000006
+      "vpip": 23.922916666666666,
+      "pfr": 17.247916666666665,
+      "af": 2.5069358381679465,
+      "wtsd": 25.998758553708637,
+      "endsPreflop": 64.275
     },
     "field": {
       "nit": {
-        "vpip": 13.325000000000001,
-        "pfr": 9.4625,
-        "af": 2.0217076700434156,
-        "wtsd": 17.733990147783253,
+        "vpip": 13.750000000000002,
+        "pfr": 9.375,
+        "af": 2.2572463768115942,
+        "wtsd": 25.448028673835125,
         "n": 1
       },
       "tag": {
-        "vpip": 22.575000000000003,
-        "pfr": 14.66875,
-        "af": 2.9434993425378044,
-        "wtsd": 25.827466052163654,
+        "vpip": 23.8125,
+        "pfr": 17.85,
+        "af": 2.613298199723034,
+        "wtsd": 26.70774997492216,
         "n": 2
       },
       "lag": {
-        "vpip": 51.7625,
-        "pfr": 34.112500000000004,
-        "af": 2.5814350797266514,
-        "wtsd": 30.61465721040189,
+        "vpip": 34.2125,
+        "pfr": 24.1125,
+        "af": 3.3146853146853146,
+        "wtsd": 33.24022346368715,
         "n": 1
       },
       "station": {
-        "vpip": 61.68749999999999,
-        "pfr": 11.325000000000001,
-        "af": 0.26018340797611433,
-        "wtsd": 19.43620178041543,
+        "vpip": 62.775000000000006,
+        "pfr": 7.5625,
+        "af": 0.5244116613979628,
+        "wtsd": 28.191110054670787,
         "n": 1
       },
       "maniac": {
-        "vpip": 71.275,
-        "pfr": 42.5375,
-        "af": 1.6411205073995772,
-        "wtsd": 24.356297842727905,
+        "vpip": 59.612500000000004,
+        "pfr": 37.6,
+        "af": 2.477821011673152,
+        "wtsd": 27.926616191030867,
         "n": 1
       }
     }
   },
   "hands": 8000,
-  "generated": "2026-09-04T06:50:21.822Z"
+  "generated": "2026-09-29T14:08:47.034Z"
 }

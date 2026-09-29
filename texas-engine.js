@@ -479,7 +479,7 @@ const playHand = (config) => {
 
   const uncalled = returnUncalled(h)
   if (uncalled && log) {
-    log('  ' + bots[uncalled.seat].name + ' takes back ' + uncalled.amount + ' uncalled')
+    log('  ' + bots[uncalled.seat].name.padEnd(10) + 'takes back ' + uncalled.amount + ' uncalled')
   }
 
   // ------------------------------------------------------------- payout
@@ -562,7 +562,7 @@ const playHand = (config) => {
     }
     if (rakePaid > 0) log('  rake ' + rakePaid)
     for (const w of winners) {
-      log('  ' + bots[w.seat].name + ' wins ' + w.amount)
+      log('  ' + bots[w.seat].name.padEnd(10) + 'wins ' + w.amount)
     }
     log('  stacks ' + h.stacks.join(' '))
   }

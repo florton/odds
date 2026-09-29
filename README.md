@@ -25,8 +25,11 @@ interesting engineering is about making those errors small enough to say somethi
   measured to play.
 - **Variance reduction that makes comparisons feasible.** Common random numbers cut
   error bars by up to **29.7x**, and duplicate dealing cancels card luck.
-
-<!-- HOLDEM-HIGHLIGHT -->
+- **A Hold'em field fitted to real population statistics, then asked who wins.**
+  Five archetypes whose constants are fitted until the simulated table
+  reproduces tracked VPIP/PFR/AF/WTSD; at the fitted table the calling station
+  loses **−152 bb/100**, and at fixed style every step of proficiency from
+  0.25 to 1.0 is worth more money than the one before.
 
 ## Quick start
 
@@ -39,6 +42,7 @@ node blackjack.js output.json      # grade the table you just solved
 node blackjack.js basic.json 6 0.75 count   # count a 6-deck shoe cut at 75%
 
 node texas.js                      # deal and print one Hold'em hand
+node texas.js --watch 5            # watch 5 hands dealt to the fitted personalities
 node texas.js --test               # engine invariant checks
 node texas-eval.js --enumerate     # verify the evaluator on all 133M seven-card hands
 node texas-calibrate.js --check    # how well the players match real statistics
@@ -150,11 +154,90 @@ blackjack one failed. VPIP over 8,000 hands has a standard deviation of 0.07; bb
 the same hands has a standard error near 20. Every candidate is also graded on identical
 seeded deals, so two parameter sets that play the same score the same to the bit.
 
-<!-- CALIBRATION-RESULTS -->
+The fit lands close enough to name the types, measured over 8,000-hand samples
+on deals the search never optimised against (stable across seeds -- VPIP moves
+only ±0.1 between them):
+
+| Type | VPIP | PFR | AF | WTSD |
+|---|---|---|---|---|
+| nit | 13.8 / 13 | 9.4 / 10 | 2.3 / 2.2 | 25.4 / 24 |
+| tag | 23.8 / 22 | 17.9 / 19 | 2.6 / 2.6 | 26.7 / 26 |
+| lag | 34.2 / 32 | 24.1 / 25 | 3.3 / 3.2 | 33.2 / 29 |
+| station | 62.8 / 45 | 7.6 / 6 | 0.5 / 0.6 | 28.2 / 42 |
+| maniac | 59.6 / 62 | 37.6 / 38 | 2.5 / 2.4 | 27.9 / 36 |
+
+*measured / target*
+
+The neutral regulars the value model was fitted on land at 23.9/17.2 VPIP/PFR
+against 22/18, aggression 2.5 on 2.5, WTSD 26.0 on 26, and 64% of hands end
+before a flop against a real ~60%. The one type the model cannot fully express
+is the calling station: playing 45% of hands and showing down 42% of them are
+targets that pull its looseness in opposite directions, and the fit resolves
+the conflict looser rather than tighter (see Limitations).
 
 ### Who wins
 
-<!-- WIN-RATE-RESULTS -->
+300,000 hands per experiment, duplicate-dealt with the lineup rotated so every
+player meets every set of cards from every seat. Error bars are clustered on
+the deck, and a claim needs three standard errors.
+
+**1. Personality at equal skill.** All six seats at proficiency 0.85, so the
+only difference between them is style:
+
+| Player | bb/100 | ± SE |
+|---|---|---|
+| maniac | +126.6 | 7.9 |
+| neutral | +3.7 | 5.2 |
+| lag | −15.4 | 6.4 |
+| nit | −16.3 | 2.6 |
+| tag | −36.5 | 4.2 |
+| station | −62.1 | 7.9 |
+
+Loose-aggressive styles win at equal execution and passive ones pay for them;
+45% of hands reach showdown. The honest caveat: this is what the *fitted*
+styles do -- the fit constrained how often they act, not how profitably, and
+the fitted maniac is sticky rather than bluffy, which at high proficiency
+plays like a strong LAG rather than a lottery player (see Limitations).
+
+**2. Skill at equal personality.** Six neutral players differing only in
+proficiency:
+
+| Proficiency | 0.25 | 0.40 | 0.55 | 0.70 | 0.85 | 1.00 |
+|---|---|---|---|---|---|---|
+| bb/100 | −84.2 | −49.1 | −16.2 | +21.2 | +59.0 | +69.2 |
+
+± ~4.7 each. Monotone at every step, and the best player clearly beats the
+worst; one proficiency step is worth roughly 20 bb/100 around the middle of
+the ladder.
+
+**3. The realistic table.** The fitted types at the proficiencies they were
+fitted at (nit .70, tag .85, lag .80, station .35, maniac .25), no rake:
+
+| Player | bb/100 | ± SE |
+|---|---|---|
+| lag | +90.8 | 5.9 |
+| tag (2) | +47.2 | 4.3 |
+| maniac | +24.2 | 6.7 |
+| tag | +19.6 | 4.1 |
+| nit | −29.8 | 2.9 |
+| station | −152.0 | 6.0 |
+
+The same table raked 5% capped at 3bb costs each seat **17.1 bb/100**; it
+flips the maniac negative (−26.0) and squeezes everyone but the loosest
+winners. The money the station loses goes somewhere: here it funds the three
+aggressive styles.
+
+**4. Where the money comes from.** The button is the most profitable seat
+(+148.9 bb/100) and both blinds lose (SB −106.2, BB −73.5); later position
+earns more, CO > HJ > UTG; aces are the most profitable starting hand
+(+1112 bb/100 when dealt) and the top five are AA KK QQ JJ TT. Everyone loses
+from the blinds, and the station loses from every seat, worst of all the small
+blind (−269 bb/100).
+
+Eight of the ten shape checks pass. The two that fail: the maniac's win rate
+is genuinely above zero in this lineup (+24.2 ± 6.7), and the TAG does not
+clearly out-earn him -- the gap, 4.6 bb/100, is under one standard error.
+Both are reported in Limitations rather than hidden.
 
 ## Measuring honestly
 
@@ -180,7 +263,22 @@ attempt without it failed:
 
 ## Limitations
 
-<!-- LIMITATIONS -->
+**Hold'em.** The calling station is only half-fitted: the model can play 45% of
+hands or show down 42% of them, but not both, because calling wide enough
+preflop for the first and calling down often enough postflop for the second
+asks the value model to accept prices it was fitted -- on the regulars -- to
+refuse. The fit resolves the conflict at 62.8 VPIP / 28.2 WTSD. Behavioural
+targets do not pin down win rate, either: they constrain how often a type
+acts, not how profitably, and the fitted maniac -- sticky rather than bluffy --
+wins at equal skill and at the realistic table where a real one would bleed.
+The traits and pulls are a coordinate-descent optimum, so the answer depends
+on the path: two parameters (maxBias, pullStickiness) sat at values that made
+further improvement impossible until lifted off them mid-fit
+(`node texas-calibrate.js --resume`), which is also the honest record of why
+the search stopped where it did. Each player has one sizing habit and no
+concept of balance, adaptation or exploitation, and the game is cash-only: no
+tournaments, buy-ins or ICM, so "stakes" enter only through the fitted
+constants and the rake settings.
 
 **Blackjack.** Two solver cells still disagree with published strategy (soft 12 and 13 v
 5, both marginal doubles). Splits are barely modelled. The counter varies only its bet,
