@@ -71,6 +71,22 @@ const OUT_FILE = path.join(__dirname, 'calibration.json')
 // that folded AA to 45% of opens and to every shove: all five statistics on
 // target, the game underneath them absurd. What is not measured is not
 // constrained, again.
+//
+// The last four are the same lesson after the flop. The field that fitted
+// everything above folded 22% of flop bets against a real ~45%, c-bet 37%
+// against a real 60-70%, and paid off so freely that aces won half a stack
+// every time they were dealt. A regular c-bets most flops, folds to one a
+// little under half the time and to a second barrel a little less, and wins
+// money at about half of the showdowns they reach -- W$SD, which is where
+// calling too much shows up, because the showdowns it buys are the ones lost.
+// And when a regular's bet is raised they fold a good part of the time,
+// because a raise after the flop is usually the goods.
+//
+// The first refit with those four shows why the last two are here. It found
+// a field that folded a raised bet a quarter of the time -- nothing measured
+// it, so the search let a raise read as barely more than a bet -- and hit
+// PFR by limping: regulars open-limped 9% of hands, which real ones almost
+// never do, and ran PFR four points short while VPIP sat on target.
 const REG_TARGETS = {
   vpip: 22,
   pfr: 18,
@@ -80,7 +96,18 @@ const REG_TARGETS = {
   threeBet: [5, 9],
   foldTo3bet: [45, 65],
   foldToSteal: [45, 70],
-  premiumFold: [0, 1]
+  premiumFold: [0, 1],
+  // A 4-bet is read as far stronger than a 3-bet, and the fit once took that
+  // to the point where the field folded almost everything to one -- the
+  // solver's best rules 4-bet a third of their hands. A regular's 3-bets are
+  // mostly continued with QQ+/AK, which folds a little over half of them.
+  foldTo4bet: [50, 75],
+  cbet: [55, 75],
+  foldToCbet: [38, 55],
+  foldToTurnCbet: [35, 50],
+  wsd: [48, 56],
+  foldToRaise: [35, 60],
+  limp: [0, 6]
 }
 
 // Named players in a mixed game. Real population stats vary by stake and site,
@@ -98,15 +125,48 @@ const REG_TARGETS = {
 // not measured is not constrained.
 // Every type also carries the premium-fold guard: however loose, tight, wild
 // or passive, nobody folds aces preflop.
+//
+// And every type carries the two money statistics, fold to a flop c-bet and
+// W$SD, in bands that give each type its shape: a nit folds most c-bets and
+// wins most of the few showdowns it reaches, a station folds few and loses
+// most of the many it reaches. The two fish also carry a win-rate band, and
+// a deliberately loose one -- published figures for how fast recreational
+// players lose vary more than any statistic here -- because before it existed
+// they lost 200-290 bb/100, two or three times what real fish lose, and every
+// strategy solved against them learned to wait for their money.
+//
+// And every type carries the preflop responses the regulars do -- how often
+// it 3-bets, folds to a 3-bet, and gives up its big blind to a steal -- in
+// bands that follow the type. Only the neutral regulars carried them at
+// first, and the rule solver found the gap within one run: the fitted TAG
+// and nit folded to a 3-bet 78-80% of the time against a real 50-60, and the
+// best rules against a table of them were to limp every hand under the gun
+// and re-raise whoever raised, for +101 bb/100 over the plain TAG.
 const FIELD_TARGETS = {
-  nit: { vpip: 13, pfr: 10, af: 2.2, wtsd: 24, premiumFold: [0, 2] },
-  tag: { vpip: 22, pfr: 19, af: 2.6, wtsd: 26, premiumFold: [0, 2] },
-  lag: { vpip: 32, pfr: 25, af: 3.2, wtsd: 29, premiumFold: [0, 2] },
-  station: { vpip: 45, pfr: 6, af: 0.6, wtsd: 42, premiumFold: [0, 2] },
-  maniac: { vpip: 62, pfr: 38, af: 2.4, wtsd: 36, premiumFold: [0, 2] }
+  nit: {
+    vpip: 13, pfr: 10, af: 2.2, wtsd: 24, premiumFold: [0, 2], foldToCbet: [50, 70], wsd: [52, 62],
+    limp: [0, 8], threeBet: [2, 5], foldTo3bet: [55, 75], foldToSteal: [65, 85]
+  },
+  tag: {
+    vpip: 22, pfr: 19, af: 2.6, wtsd: 26, premiumFold: [0, 2], foldToCbet: [38, 55], wsd: [48, 56],
+    limp: [0, 8], threeBet: [5, 9], foldTo3bet: [45, 65], foldToSteal: [45, 70]
+  },
+  lag: {
+    vpip: 32, pfr: 25, af: 3.2, wtsd: 29, premiumFold: [0, 2], foldToCbet: [33, 50], wsd: [46, 54],
+    threeBet: [8, 14], foldTo3bet: [35, 55], foldToSteal: [35, 60]
+  },
+  station: {
+    vpip: 45, pfr: 6, af: 0.6, wtsd: 42, premiumFold: [0, 2], foldToCbet: [20, 35], wsd: [40, 48],
+    bb100: [-120, -15], threeBet: [1, 4], foldTo3bet: [20, 45], foldToSteal: [20, 45]
+  },
+  maniac: {
+    vpip: 62, pfr: 38, af: 2.4, wtsd: 36, premiumFold: [0, 2], foldToCbet: [25, 45], wsd: [40, 50],
+    bb100: [-150, -20], threeBet: [10, 20], foldTo3bet: [20, 45], foldToSteal: [20, 50]
+  }
 }
 
-const RESPONSE_KEYS = ['threeBet', 'foldTo3bet', 'foldToSteal', 'premiumFold']
+const RESPONSE_KEYS = ['threeBet', 'foldTo3bet', 'foldTo4bet', 'foldToSteal', 'premiumFold']
+const POSTFLOP_KEYS = ['cbet', 'foldToCbet', 'foldToTurnCbet', 'wsd', 'foldToRaise', 'limp']
 
 // The starting proficiencies. The fit may move them per archetype via the
 // profile's `skill` key, which overrides these once written to
@@ -174,6 +234,7 @@ const measureRegs = (params, hands, seed, proficiency = 0.85) => {
     endsPreflop
   }
   for (const k of RESPONSE_KEYS) out[k] = average(rows, k)
+  for (const k of POSTFLOP_KEYS) out[k] = average(rows, k)
   return out
 }
 
@@ -189,7 +250,7 @@ const measureArchetypes = (params, traits, hands, seed) => {
   const players = kinds.map((k, i) =>
     archetype(k, fieldSkill(k), rng, k + i))
   const { rows } = runField(players, hands, seed)
-  const keys = ['vpip', 'pfr', 'af', 'wtsd', ...RESPONSE_KEYS]
+  const keys = ['vpip', 'pfr', 'af', 'wtsd', ...RESPONSE_KEYS, ...POSTFLOP_KEYS, 'bb100']
   const out = {}
   kinds.forEach((k, i) => {
     if (!out[k]) {
@@ -226,12 +287,13 @@ const errorAgainst = (got, targets) => {
     // near zero, whose middle would otherwise make a fraction of a percent
     // outweigh every other statistic together. It did: scaled by its middle
     // of 1, the premium-fold guard was 40% of the whole archetype error and
-    // no stage 3 move could get past it.
+    // no stage 3 move could get past it. The middle is taken by size, for the
+    // win-rate bands, which sit below zero.
     let d
     if (Array.isArray(want)) {
       const [lo, hi] = want
       const off = have < lo ? lo - have : have > hi ? have - hi : 0
-      d = off / Math.max(5, (lo + hi) / 2)
+      d = off / Math.max(5, Math.abs((lo + hi) / 2))
     } else {
       d = (have - want) / want
     }
@@ -292,7 +354,11 @@ const BOUNDS = {
   // side reaches ~+0.29 equity at the stickiness bound of 0.98.
   handOvervalue: [-0.2, 0.6],
   futureCost: [0.0, 3.0],
-  callShadePostBase: [0.0, 0.9]
+  callShadePostBase: [0.0, 0.9],
+  initiative: [0.0, 0.5],
+  postRange: [0.1, 1.0],
+  postRaiseWeight: [0.5, 5.0],
+  postCallWeight: [0.02, 2.0]
 }
 
 const clampParam = (key, value) => {
@@ -316,8 +382,17 @@ const search = (start, keys, evaluate, passes, label) => {
     let improved = false
     const mults = [1 - span, 1 - span / 2, 1 + span / 2, 1 + span]
     for (const key of keys) {
+      // Steps are multiples of the current value, so a parameter at zero
+      // could never move: zero times any step is zero. handOvervalue sat at
+      // 0.000 through every fit since it was added, which an earlier write-up
+      // read as the search declining it -- it was never tried. At zero the
+      // steps are fractions of the parameter's range instead.
+      const [lo, hi] = BOUNDS[key] || [0, 1]
+      const at0 = Math.abs(best[key]) < 1e-12
       for (const mult of mults) {
-        const value = clampParam(key, best[key] * mult)
+        const value = at0
+          ? clampParam(key, (mult - 1) * (hi - lo) / 4)
+          : clampParam(key, best[key] * mult)
         if (Math.abs(value - best[key]) < 1e-12) continue
         const candidate = { ...best, [key]: value }
         const err = evaluate(candidate)
@@ -368,12 +443,27 @@ const KEY_BOUNDS = { skill: [0.05, 0.95] }   // per-key; default [0.02, 0.98]
 const SCALE_KEYS = ['stickinessScale']
 const SCALE_BOUNDS = [0.25, 4.0]
 
+// A type is first its four defining numbers -- how often it plays, raises,
+// bets and shows down -- and the bands after them are guards on how it does
+// it. Averaged all together, VPIP became one term in thirteen once the bands
+// arrived, and the fit let the maniac play 42% of hands against 62 to buy
+// fractions of a point inside bands. So the four and the bands are weighted
+// half and half.
+const CORE_KEYS = ['vpip', 'pfr', 'af', 'wtsd']
+const typeError = (got, targets) => {
+  const core = {}
+  const guard = {}
+  for (const k of Object.keys(targets)) (CORE_KEYS.includes(k) ? core : guard)[k] = targets[k]
+  if (!Object.keys(guard).length) return errorAgainst(got, core)
+  return 0.5 * errorAgainst(got, core) + 0.5 * errorAgainst(got, guard)
+}
+
 const archetypeError = (got) => {
   const per = {}
   let total = 0
   let n = 0
   for (const kind of Object.keys(FIELD_TARGETS)) {
-    per[kind] = errorAgainst(got[kind], FIELD_TARGETS[kind])
+    per[kind] = typeError(got[kind], FIELD_TARGETS[kind])
     total += per[kind]
     n++
   }
@@ -525,16 +615,23 @@ const reportArchetypes = (got) => {
   console.log('\nMixed field   (measured / target)')
   console.log('  ' + 'type'.padEnd(9) + 'VPIP'.padStart(12) + 'PFR'.padStart(12) +
     'AF'.padStart(12) + 'WTSD'.padStart(12) + 'AA/KK fold'.padStart(13) +
-    '3bet'.padStart(7) + 'F3bet'.padStart(7) + 'FSteal'.padStart(8))
+    'FoldCbet'.padStart(12) + 'W$SD'.padStart(12) + 'bb/100'.padStart(16) +
+    '3bet'.padStart(11) + 'F3bet'.padStart(12) + 'FSteal'.padStart(12) +
+    'Cbet'.padStart(7) + 'FTurn'.padStart(7) + 'FRaise'.padStart(8) + 'Limp'.padStart(10))
   const cell = (have, want, w = 12) =>
     ((isFinite(have) ? have.toFixed(1) : 'inf') + '/' + targetText(want)).padStart(w)
   const bare = (have, w) => (isFinite(have) ? have.toFixed(1) : '-').padStart(w)
+  const maybe = (have, want, w) => want !== undefined ? cell(have, want, w) : bare(have, w)
   for (const k of Object.keys(FIELD_TARGETS)) {
     const t = FIELD_TARGETS[k]
     console.log('  ' + k.padEnd(9) + cell(got[k].vpip, t.vpip) +
       cell(got[k].pfr, t.pfr) + cell(got[k].af, t.af) + cell(got[k].wtsd, t.wtsd) +
-      cell(got[k].premiumFold, t.premiumFold, 13) + bare(got[k].threeBet, 7) +
-      bare(got[k].foldTo3bet, 7) + bare(got[k].foldToSteal, 8))
+      cell(got[k].premiumFold, t.premiumFold, 13) + maybe(got[k].foldToCbet, t.foldToCbet, 12) +
+      maybe(got[k].wsd, t.wsd, 12) + maybe(got[k].bb100, t.bb100, 16) +
+      maybe(got[k].threeBet, t.threeBet, 11) + maybe(got[k].foldTo3bet, t.foldTo3bet, 12) +
+      maybe(got[k].foldToSteal, t.foldToSteal, 12) +
+      bare(got[k].cbet, 7) + bare(got[k].foldToTurnCbet, 7) + bare(got[k].foldToRaise, 8) +
+      maybe(got[k].limp, t.limp, 10))
   }
 }
 
@@ -728,11 +825,11 @@ if (require.main === module) {
     // Stage one. Neutral traits, so the four personality scales are multiplied
     // by zero and cannot affect anything -- this fits the value model alone.
     console.log('\nStage 1: the value model, against a table of regulars')
-    const stage1Keys = ['foldBase', 'foldSlope', 'stubbornness',
+    const stage1Keys = ['foldBase', 'foldSlope', 'stubbornness', 'initiative',
       'openBase', 'openDecay', 'limpedMult', 'limpGap', 'chartScale', 'threeBetEq',
       'rangeOpen', 'rangeStep', 'rangeSizeExp', 'enterRate', 'raiseBehind', 'callShadePost', 'raiseShade', 'temperature', 'temperaturePre', 'pullPosition',
       'positionPostWeight', 'futureCost',
-      'callShadePostBase']
+      'callShadePostBase', 'postRange', 'postRaiseWeight', 'postCallWeight']
     const s1 = search(baseline, stage1Keys,
       (p) => errorAgainst(measureRegs(p, HANDS, 7), REG_TARGETS), 12, 'stage 1')
 

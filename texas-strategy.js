@@ -37,25 +37,40 @@
 // cell, update the ones that are clearly wrong, estimate again.
 //
 // What it cannot tell you is written down in advance: a chart solved here is
-// the best response to *this* field, which is fitted to how often real players
-// act, not to how much their mistakes cost. That is why it can be solved
-// against several fields, and why the output marks which cells agree.
+// the best response to *this* field, which is fitted to what trackers measure
+// about real players and never adapts to the hero. Whatever those statistics
+// leave out, the best response finds -- so far a TAG type that folded to
+// 3-bets 80% of the time, a station that called river bets with nothing, and
+// a field that can be limp-reraised forever. That is why it can be solved
+// against several fields, why the output marks which cells agree, and why an
+// edge over the plain TAG of more than a few bb/100 is a finding about the
+// field before it is a strategy.
 //
-//   node texas-strategy.js                    solve against the realistic field
-//   node texas-strategy.js 400 --field tough  400 deals per seat/hand per pass
+// A 169-hand chart is also mostly noise at any affordable sample size, so the
+// default is not a chart but the rule a player actually carries: "raise the top
+// X% from this seat, call the next Y%, fold the rest". Hands are pooled into
+// bands of the ranking (see BAND_EDGES), each band valued as a whole, and every
+// pass the hero plays the best rule of that shape -- so the rule is what gets
+// solved, not something read off a chart afterwards.
+//
+//   node texas-strategy.js                    solve rules against the realistic field
+//   node texas-strategy.js 2000 --field tough 2000 deals per seat/band per pass (default 800)
+//   node texas-strategy.js --chart            the full 169-hand chart instead
 //   node texas-strategy.js --no-rake          no rake (default: 5%, cap 3bb)
-//   node texas-strategy.js --show             print the saved chart(s)
+//   node texas-strategy.js --show             print the saved rules (--chart: charts)
 //   node texas-strategy.js --agree            what the saved fields agree on
+//   node texas-strategy.js --agree --cross    and each field's rules played in the others
 
 const fs = require('fs')
 const path = require('path')
 const { playHand, makeRng, shuffle } = require('./texas-engine')
 const { archetype } = require('./texas-players')
 const { fieldSkill } = require('./texas-calibrate')
-const { handIndex, handLabel, preflopEquity } = require('./texas-equity')
+const { handIndex, handLabel, handRank, preflopEquity } = require('./texas-equity')
 const { RANKS } = require('./texas-eval')
 
 const OUT_FILE = path.join(__dirname, 'strategy.json')
+const RULES_FILE = path.join(__dirname, 'rules.json')
 const BIG_BLIND = 2
 const STACK = 200
 const POSITIONS = ['BTN', 'SB', 'BB', 'UTG', 'HJ', 'CO']
@@ -97,7 +112,76 @@ const situationOf = (v) => {
   return raises === 1 ? 'raised' : '3bet'
 }
 
-const keyOf = (pos, situation, hand) => pos + '|' + situation + '|' + handLabel(hand)
+const cellKey = (pos, situation, label) => pos + '|' + situation + '|' + label
+const keyOf = (pos, situation, hand) => cellKey(pos, situation, handLabel(hand))
+
+// ------------------------------------------------------------------ units
+//
+// What a cell is keyed on besides the seat and the situation: one of the 169
+// hands, or a band of the hand ranking.
+//
+// Bands are cut on the ranking by equity against three random hands (the one
+// range charts are written in, texas-equity.js handRank), as percentages of
+// all 1326 combinations: a point wide at the top, where one band is the
+// difference between 3-betting and folding, and fifteen wide at the bottom,
+// where everything folds anyway. Twenty-one bands in place of 169 hands puts
+// about eight times the deals behind every estimate for the same cost, which
+// is the difference between a chart that is mostly noise and one that is not.
+const BAND_EDGES = [1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 17, 20, 24, 28, 33, 40, 50, 60, 70, 85, 100]
+
+const combosOf = (h) => {
+  const a = Math.floor(h / 13)
+  const b = h % 13
+  return a === b ? 6 : a > b ? 4 : 12
+}
+
+const HAND_UNITS = {
+  kind: 'hands',
+  count: 169,
+  label: handLabel,
+  unitOf: (hand) => hand,
+  draw: (unit) => unit,
+  weight: (unit) => combosOf(unit) / 1326
+}
+
+let bandUnits = null
+const BAND_UNITS = () => {
+  if (bandUnits) return bandUnits
+  const members = BAND_EDGES.map(() => [])
+  const of = new Array(169)
+  for (let h = 0; h < 169; h++) {
+    const r = handRank(h)
+    let b = 0
+    while (b < BAND_EDGES.length - 1 && BAND_EDGES[b] <= r) b++
+    of[h] = b
+    members[b].push(h)
+  }
+  const combos = members.map((m) => m.reduce((s, h) => s + combosOf(h), 0))
+  // Where each band actually starts and ends, in percent of hands: whole
+  // starting hands cannot be split, so the edges above are only approximate.
+  const upTo = []
+  let cum = 0
+  for (const c of combos) upTo.push((cum += c) / 1326 * 100)
+  bandUnits = {
+    kind: 'bands',
+    count: members.length,
+    members,
+    upTo,
+    label: (unit) => 'B' + String(unit).padStart(2, '0'),
+    unitOf: (hand) => of[hand],
+    // A hand from the band, as often as it is dealt.
+    draw: (unit, rng) => {
+      let r = rng() * combos[unit]
+      for (const h of members[unit]) {
+        r -= combosOf(h)
+        if (r < 0) return h
+      }
+      return members[unit][members[unit].length - 1]
+    },
+    weight: (unit) => combos[unit] / 1326
+  }
+  return bandUnits
+}
 
 // The chart's vocabulary. `call` doubles as a check when there is nothing to
 // call, and folding is not offered then because a free card is never worse.
@@ -142,7 +226,7 @@ const raiseTo = (v, situation) => {
 //
 // Stateless apart from `override` and `trace`, which only the solver sets: the
 // decision number is read off the history, so the same bot can be replayed.
-const makeHero = (name, chart, post) => {
+const makeHero = (name, chart, post, units = HAND_UNITS) => {
   const hero = {
     name,
     chart,
@@ -154,10 +238,13 @@ const makeHero = (name, chart, post) => {
       let k = 0
       for (const a of v.history) if (a.seat === v.seat && a.street === 'preflop') k++
       const situation = situationOf(v)
-      const key = keyOf(positionOf(v), situation, handIndex(v.holeCards[0], v.holeCards[1]))
+      const unit = units.unitOf(handIndex(v.holeCards[0], v.holeCards[1]))
+      const key = cellKey(positionOf(v), situation, units.label(unit))
       const legal = legalOf(v)
 
       let action = chart.get(key)
+      // A rule that says fold where checking is free means check.
+      if (action === 'fold' && !legal.includes('fold')) action = 'call'
       if (!action || !legal.includes(action)) {
         const said = post.act(v).action
         action = said === 'raise' ? 'raise' : said === 'fold' && v.toCall > 0 ? 'fold' : 'call'
@@ -312,24 +399,26 @@ const valuesOf = (c) => {
 
 // ----------------------------------------------------------------- solving
 
-const solve = ({ fieldName, perCell, passes, focus = 3, rake, seed, minN, log }) => {
+const solve = ({ fieldName, perCell, passes, focus = 3, rake, seed, minN, log, units = HAND_UNITS }) => {
   const table = makeTable(fieldName)
   const chart = new Map()
-  const hero = makeHero('hero', chart, table.post)
+  const hero = makeHero('hero', chart, table.post, units)
   const rng = makeRng(seed)
+  const rules = units.kind === 'bands'
 
-  // Deal `deals` hands to each (seat, hand) pair that `want` admits, and add
+  // Deal `deals` hands to each (seat, unit) pair that `want` admits, and add
   // every decision the hero meets along the way to `est`. Every sample of a
-  // cell comes from that cell's own seat and hand, so dealing some pairs more
-  // than others biases nothing -- it only narrows their error bars.
+  // cell comes from that cell's own seat and hand (or band), so dealing some
+  // pairs more than others biases nothing -- it only narrows their error bars.
   const sample = (est, deals, want) => {
     let plays = 0
     for (let rep = 0; rep < deals; rep++) {
       for (const pos of POSITIONS) {
-        for (let hand = 0; hand < 169; hand++) {
-          if (want && !want(pos, hand)) continue
-          const dk = pos + '|' + handLabel(hand)
+        for (let unit = 0; unit < units.count; unit++) {
+          if (want && !want(pos, unit)) continue
+          const dk = pos + '|' + units.label(unit)
           est.dealt.set(dk, (est.dealt.get(dk) || 0) + 1)
+          const hand = units.draw(unit, rng)
           const play = makeDeal(table, hero, pos, hand, rng, rake)
           const base = play(null)
           plays++
@@ -375,6 +464,28 @@ const solve = ({ fieldName, perCell, passes, focus = 3, rake, seed, minN, log })
     return set + ' cells filled, ' + changed + ' changed'
   }
 
+  // In rule mode the chart is then replaced by the best rule of the shape a
+  // player carries, so the next pass values the rule, not a band-by-band
+  // chart nobody would memorise. See fitRules.
+  const project = (est) => {
+    const fitted = fitRules(est.cells, est.dealt, units, minN)
+    for (const r of fitted) {
+      for (let unit = 0; unit < units.count; unit++) {
+        chart.set(cellKey(r.pos, r.situation, units.label(unit)),
+          unit < r.raiseBands ? 'raise' : unit < r.callBands ? 'call' : 'fold')
+      }
+    }
+    return fitted
+  }
+  const step = (est) => {
+    if (!rules) return update(est)
+    const before = new Map(chart)
+    const fitted = project(est)
+    let changed = 0
+    for (const [key, action] of chart) if (before.get(key) !== action) changed++
+    return fitted.length + ' rules fitted, ' + changed + ' band cells changed'
+  }
+
   // Policy iteration. Each pass starts a fresh estimate, because the values
   // depend on the chart and the chart just changed.
   let est = null
@@ -382,9 +493,9 @@ const solve = ({ fieldName, perCell, passes, focus = 3, rake, seed, minN, log })
     const started = Date.now()
     est = makeCells()
     const plays = sample(est, perCell, null)
-    const note = update(est)
+    const note = step(est)
     if (log) {
-      log('  pass ' + pass + ': ' + perCell + ' deals per seat and hand, ' +
+      log('  pass ' + pass + ': ' + perCell + ' deals per seat and ' + (rules ? 'band' : 'hand') + ', ' +
         plays.toLocaleString() + ' hands in ' +
         ((Date.now() - started) / 1000).toFixed(0) + 's; ' + note)
     }
@@ -398,18 +509,22 @@ const solve = ({ fieldName, perCell, passes, focus = 3, rake, seed, minN, log })
     const unsure = new Set()
     for (const [key, c] of est.cells) {
       if (c.n < minN) continue
-      if (confidenceOf(c, chart.get(key)) < 2) {
+      // A rule can hold a band to an action that is clearly not its best --
+      // that is the price of the rule, and more deals will not change it.
+      // What more deals can settle is a band that is close either way.
+      const z = confidenceOf(c, chart.get(key))
+      if (rules ? Math.abs(z) < 2 : z < 2) {
         const [pos, , label] = key.split('|')
         unsure.add(pos + '|' + label)
       }
     }
     if (!unsure.size) break
     const started = Date.now()
-    const plays = sample(est, perCell, (pos, hand) => unsure.has(pos + '|' + handLabel(hand)))
-    const note = update(est)
+    const plays = sample(est, perCell, (pos, unit) => unsure.has(pos + '|' + units.label(unit)))
+    const note = step(est)
     if (log) {
-      log('  focus ' + round + ': ' + unsure.size + ' seat/hand pairs still close, ' +
-        plays.toLocaleString() + ' hands in ' +
+      log('  focus ' + round + ': ' + unsure.size + ' seat/' + (rules ? 'band' : 'hand') +
+        ' pairs still close, ' + plays.toLocaleString() + ' hands in ' +
         ((Date.now() - started) / 1000).toFixed(0) + 's; ' + note)
     }
   }
@@ -417,7 +532,11 @@ const solve = ({ fieldName, perCell, passes, focus = 3, rake, seed, minN, log })
   // The hysteresis above is for stability while the values are still moving.
   // The chart handed back takes each cell's best estimated action on the final
   // estimates -- otherwise it keeps choices made on an early, noisy pass that
-  // the latest data no longer supports.
+  // the latest data no longer supports. In rule mode, the best rule on them.
+  if (rules) {
+    const fitted = project(est)
+    return { chart, cells: est.cells, dealt: est.dealt, table, rules: fitted }
+  }
   for (const [key, c] of est.cells) {
     if (c.n < minN) continue
     const vals = valuesOf(c)
@@ -429,14 +548,124 @@ const solve = ({ fieldName, perCell, passes, focus = 3, rake, seed, minN, log })
   return { chart, cells: est.cells, dealt: est.dealt, table }
 }
 
+// ------------------------------------------------------------------ rules
+//
+// For each seat and situation, the two cutoffs down the hand ranking that
+// earn the most: the top bands take `raise`, the next `call`, the rest
+// `fold`. Every pair of cutoffs is tried -- prefix sums make each one a
+// lookup -- with each band weighted by how often it is dealt and how often,
+// once dealt in that seat, it reaches the spot, so the total is the rule's
+// value per hand dealt in the seat.
+//
+// Where folding is not offered (the big blind's free option), its value is
+// missing and no rule puts a band there; the hero checks, as a player would.
+//
+// A cutoff is only as sure as the bands either side of it, so each comes
+// with the stretch of the ranking where the two actions it separates are
+// within two standard errors of each other: "3-bet the top 6% (anywhere from
+// 4 to 8 is noise)". That stretch is the honest precision of the rule.
+const RULE_ACTIONS = ['raise', 'call', 'fold']
+
+const fitRules = (cells, dealt, units, minN) => {
+  const out = []
+  for (const situation of SITUATIONS) {
+    for (const pos of ACTING_ORDER) {
+      const rows = []
+      for (let unit = 0; unit < units.count; unit++) {
+        const label = units.label(unit)
+        const c = cells.get(cellKey(pos, situation, label))
+        if (!c || c.n < minN) continue
+        const reach = c.n / (dealt.get(pos + '|' + label) || c.n)
+        rows.push({ unit, c, ev: valuesOf(c), w: units.weight(unit) * reach })
+      }
+      if (rows.length < 2) continue
+      const n = rows.length
+      const ev = (row, a) => (row.ev[a] !== undefined ? row.ev[a] : -1e6)
+      const prefix = RULE_ACTIONS.map((a) => {
+        const s = [0]
+        for (let i = 0; i < n; i++) s.push(s[i] + rows[i].w * ev(rows[i], a))
+        return s
+      })
+      let best = null
+      for (let c1 = 0; c1 <= n; c1++) {
+        for (let c2 = c1; c2 <= n; c2++) {
+          const total = prefix[0][c1] + (prefix[1][c2] - prefix[1][c1]) + (prefix[2][n] - prefix[2][c2])
+          if (!best || total > best.total + 1e-12) best = { total, c1, c2 }
+        }
+      }
+      // Cutoffs as band indices, so bands too rarely seen to estimate still
+      // get the action their place in the ranking implies.
+      const edge = (k) => (k < n ? rows[k].unit : units.count)
+      const e1 = edge(best.c1)
+      const e2 = edge(best.c2)
+      const pct = (unit) => (unit <= 0 ? 0 : units.upTo[unit - 1])
+      const ruleAt = (i) => (i < best.c1 ? 'raise' : i < best.c2 ? 'call' : 'fold')
+
+      // The price of the rule against every band taking its own best action.
+      // Taking the best of several noisy estimates overstates it -- the best
+      // looks best partly because its noise ran high -- so the part of it
+      // that clears two standard errors is reported alongside.
+      let free = 0
+      let clear = 0
+      rows.forEach((r, i) => {
+        let top = null
+        for (const a of Object.keys(r.ev)) if (top === null || r.ev[a] > r.ev[top]) top = a
+        free += r.w * r.ev[top]
+        const mine = ruleAt(i)
+        if (top !== mine && r.ev[mine] !== undefined) {
+          const d = pairDiff(r.c, top, mine)
+          if (d && d.mean > 2 * d.se) clear += r.w * (r.ev[top] - r.ev[mine])
+        }
+      })
+
+      // The stretch around a boundary where the actions either side of it are
+      // within two standard errors, in percent of hands.
+      const fuzz = (k, above, below) => {
+        let lo = k
+        let hi = k
+        const close = (row) => {
+          const d = pairDiff(row.c, above, below)
+          return d !== null && d.se > 0 && Math.abs(d.mean / d.se) < 2
+        }
+        while (lo > 0 && close(rows[lo - 1])) lo--
+        while (hi < n && close(rows[hi])) hi++
+        return [pct(edge(lo)), pct(edge(hi))]
+      }
+      const firstBelow = best.c2 > best.c1 ? 'call' : 'fold'
+
+      out.push({
+        pos,
+        situation,
+        raiseBands: e1,
+        callBands: e2,
+        raise: pct(e1),
+        call: pct(e2) - pct(e1),
+        raiseFuzz: fuzz(best.c1, 'raise', firstBelow),
+        callFuzz: best.c2 > best.c1 && best.c2 < n ? fuzz(best.c2, 'call', 'fold') : null,
+        // All in bb per 100 hands dealt in the seat.
+        value: best.total * 100,
+        loss: (free - best.total) * 100,
+        clearLoss: clear * 100,
+        bands: rows.map((r) => ({
+          band: r.unit,
+          n: r.c.n,
+          reach: Math.round(r.w / units.weight(r.unit) * 1000) / 1000,
+          ev: Object.fromEntries(Object.entries(r.ev).map(([a, x]) => [a, Math.round(x * 1000) / 1000]))
+        }))
+      })
+    }
+  }
+  return out
+}
+
 // ------------------------------------------------------------- the verdict
 //
 // Replays the solved chart and the plain TAG from every seat on the same deals
 // with the same draws, and differences them hand by hand. This is the only
 // number that says whether the chart is worth learning, so it is measured on
 // fresh deals the solver never saw.
-const validate = ({ table, chart, rake, hands, seed }) => {
-  const hero = makeHero('chart', chart, table.post)
+const validate = ({ table, chart, rake, hands, seed, units = HAND_UNITS }) => {
+  const hero = makeHero('chart', chart, table.post, units)
   const rng = makeRng(seed)
   const decks = Math.max(1, Math.floor(hands / 6))
   const acc = { chart: [], tag: [], diff: [] }
@@ -706,6 +935,123 @@ const printAgreement = (saved, minN) => {
   }
 }
 
+// ----------------------------------------------------- printing the rules
+
+const RULE_WORDS = {
+  unopened: ['Folded to you', 'raise', 'limp'],
+  limped: ['Limpers in front', 'raise', 'call'],
+  raised: ['Facing one raise', '3-bet', 'call'],
+  reraised: ['You raised and were re-raised', '4-bet', 'call'],
+  '3bet': ['Facing a raise and a 3-bet', '4-bet', 'call']
+}
+
+const span = (f) => f && f[1] - f[0] > 0.05
+  ? ' (' + f[0].toFixed(0) + '-' + f[1].toFixed(0) + ')'
+  : ''
+
+const printBandRules = (rules) => {
+  const lines = []
+  for (const situation of SITUATIONS) {
+    const rows = rules.filter((r) => r.situation === situation)
+    if (!rows.length) continue
+    const [title, up, mid] = RULE_WORDS[situation]
+    lines.push({ title })
+    for (const r of rows) {
+      // The big blind's option costs nothing, so its "call" is a check.
+      const passive = situation === 'limped' && r.pos === 'BB' ? 'check' : mid
+      const parts = []
+      if (r.raise > 0) parts.push(up + ' the top ' + r.raise.toFixed(0) + '%' + span(r.raiseFuzz))
+      if (r.call > 0 && r.raise + r.call >= 99.9) {
+        parts.push(passive + (parts.length ? ' the rest' : ' everything'))
+      } else if (r.call > 0) {
+        parts.push((parts.length ? passive + ' the next ' : passive + ' the top ') +
+          r.call.toFixed(0) + '%' + span(r.callFuzz))
+      }
+      const rest = r.raise + r.call >= 99.9 ? '' : parts.length ? ', fold the rest' : 'fold everything'
+      lines.push({
+        rule: '    ' + r.pos.padEnd(4) + parts.join(', ') + rest,
+        cost: 'costs ' + r.loss.toFixed(1) + ' (' + r.clearLoss.toFixed(1) + ' clear)'
+      })
+    }
+  }
+  const width = Math.max(...lines.filter((l) => l.rule).map((l) => l.rule.length)) + 3
+  for (const l of lines) {
+    if (l.title) console.log('\n  ' + l.title.toUpperCase())
+    else console.log(l.rule.padEnd(width) + l.cost)
+  }
+  console.log('\n  In brackets: where along the ranking the two actions either side of a')
+  console.log('  cutoff are within two standard errors -- anywhere in there is as good as')
+  console.log('  the number; no bracket, the cutoff is clear. "Costs": bb per 100 hands')
+  console.log('  dealt in that seat against playing every band its own best action, and')
+  console.log('  the part of that clear at 2 SE.')
+}
+
+const printBandKey = (units) => {
+  console.log('\n  THE RANKING  (by equity against three random hands; top X% is everything above X)')
+  let from = 0
+  for (let b = 0; b < units.count && from < 50; b++) {
+    const to = units.upTo[b]
+    console.log('    ' + (from.toFixed(0) + '-' + to.toFixed(0) + '%').padStart(8) + '  ' +
+      rangeText(units.members[b]))
+    from = to
+  }
+  console.log('    ' + (from.toFixed(0) + '-100%').padStart(8) + '  everything else')
+}
+
+// The chart a saved rule set plays, for replaying it in another field.
+const chartFromRules = (rules, units) => {
+  const chart = new Map()
+  for (const r of rules) {
+    for (let unit = 0; unit < units.count; unit++) {
+      const action = unit < r.raiseBands ? 'raise' : unit < r.callBands ? 'call' : 'fold'
+      chart.set(cellKey(r.pos, r.situation, units.label(unit)), action)
+    }
+  }
+  return chart
+}
+
+const printRuleAgreement = (saved, cross) => {
+  const names = Object.keys(saved.fields || {})
+  if (names.length < 2) {
+    console.log('Solve at least two fields first (--field realistic|tough|soft).')
+    return
+  }
+  console.log('\nRules by field: ' + names.join(', ') + '   (raise% / call%)')
+  for (const situation of SITUATIONS) {
+    const [title] = RULE_WORDS[situation]
+    let printed = false
+    for (const pos of ACTING_ORDER) {
+      const cells = names.map((n) => saved.fields[n].rules.find((r) => r.pos === pos && r.situation === situation))
+      if (cells.every((c) => !c)) continue
+      if (!printed) {
+        console.log('\n  ' + title.toUpperCase().padEnd(30) + names.map((n) => n.padStart(14)).join(''))
+        printed = true
+      }
+      console.log('    ' + pos.padEnd(28) + cells.map((c) => (c
+        ? c.raise.toFixed(0) + ' / ' + c.call.toFixed(0)
+        : '-').padStart(14)).join(''))
+    }
+  }
+
+  if (!cross) return
+  // A rule solved against one field is a best response to that field. Played
+  // in the others it says how much of its edge was the field's.
+  const units = BAND_UNITS()
+  console.log('\n  Each field\'s rules against the plain fitted TAG, played in every field')
+  console.log('  (bb/100 difference, same seats and draws, 60,000 fresh hands each)')
+  console.log('    ' + 'solved against'.padEnd(18) + names.map((n) => ('in ' + n).padStart(20)).join(''))
+  for (const from of names) {
+    const chart = chartFromRules(saved.fields[from].rules, units)
+    const cells = names.map((into) => {
+      const table = makeTable(into)
+      const rake = saved.fields[from].rake || { percent: 0, cap: 0, noFlopNoDrop: true }
+      const check = validate({ table, chart, rake, hands: 60000, seed: 999, units })
+      return (check.diff.bb100 >= 0 ? '+' : '') + check.diff.bb100.toFixed(1) + ' +/- ' + check.diff.se.toFixed(1)
+    })
+    console.log('    ' + from.padEnd(18) + cells.map((c) => c.padStart(20)).join(''))
+  }
+}
+
 // `ev` is in big blinds per decision, relative to nothing -- the hero's whole
 // result for the hand -- so differences between actions are what matter.
 // `reach` is how often a hand dealt in that seat arrives at this spot.
@@ -732,7 +1078,78 @@ const entriesOf = (chart, cells, dealt) => {
 
 // -------------------------------------------------------------------- main
 
-module.exports = { makeHero, makeTable, situationOf, positionOf, raiseTo, rangeText, solve, validate, FIELDS }
+module.exports = {
+  makeHero, makeTable, situationOf, positionOf, raiseTo, rangeText, solve, validate, FIELDS,
+  BAND_UNITS, HAND_UNITS, chartFromRules
+}
+
+const printCheck = (check, what) => {
+  console.log('\n  Against the plain fitted TAG on ' + check.hands.toLocaleString() +
+    ' fresh hands, same seats and draws:')
+  console.log('    ' + what + ' ' + check.chart.bb100.toFixed(1) + ' +/- ' + check.chart.se.toFixed(1) +
+    '   tag ' + check.tag.bb100.toFixed(1) + ' +/- ' + check.tag.se.toFixed(1) +
+    '   difference ' + (check.diff.bb100 >= 0 ? '+' : '') + check.diff.bb100.toFixed(1) +
+    ' +/- ' + check.diff.se.toFixed(1) + ' bb/100')
+}
+
+// The default: rules on bands of the ranking.
+const mainRules = (args, flag) => {
+  const minN = 20
+  const saved = fs.existsSync(RULES_FILE)
+    ? JSON.parse(fs.readFileSync(RULES_FILE, 'utf8'))
+    : { fields: {} }
+  const units = BAND_UNITS()
+
+  if (args.includes('--show')) {
+    printBandKey(units)
+    for (const name of Object.keys(saved.fields)) {
+      const s = saved.fields[name]
+      console.log('\n=== ' + name + ' field' + (s.rake ? ', raked' : ', no rake') + ' ===')
+      printBandRules(s.rules)
+      printCheck(s.validation, 'rules')
+    }
+    return
+  }
+  if (args.includes('--agree')) {
+    printRuleAgreement(saved, args.includes('--cross'))
+    return
+  }
+
+  const perCell = Number(args.find((a) => /^\d+$/.test(a))) || 800
+  const fieldName = flag('--field', 'realistic')
+  const rake = args.includes('--no-rake') ? { percent: 0, cap: 0, noFlopNoDrop: true } : RAKE
+  const passes = Number(flag('--passes', 3))
+
+  console.log('Solving preflop rules against the ' + fieldName + ' field (' +
+    FIELDS[fieldName].join(', ') + '), ' +
+    (rake.percent ? '5% rake capped at 3bb' : 'no rake') + ', ' + units.count + ' bands of the ranking')
+  const started = Date.now()
+  const { chart, table, rules } = solve({
+    fieldName, perCell, passes, focus: Number(flag('--focus', 3)), rake, seed: 12345, minN,
+    log: console.log, units
+  })
+  printBandKey(units)
+  printBandRules(rules)
+
+  const check = validate({ table, chart, rake, hands: 120000, seed: 777, units })
+  printCheck(check, 'rules')
+
+  // Read again before writing: the fields are independent solves, and running
+  // them side by side is the cheap way to get all three.
+  const latest = fs.existsSync(RULES_FILE)
+    ? JSON.parse(fs.readFileSync(RULES_FILE, 'utf8'))
+    : { fields: {} }
+  Object.assign(saved, latest)
+  saved.bands = units.members.map((m, b) => ({ upTo: units.upTo[b], hands: m.map(handLabel) }))
+  saved.fields[fieldName] = {
+    generated: new Date().toISOString(),
+    perCell, passes, rake: rake.percent > 0 ? rake : null,
+    validation: check,
+    rules
+  }
+  fs.writeFileSync(RULES_FILE, JSON.stringify(saved, null, 1))
+  console.log('\nWrote rules.json in ' + ((Date.now() - started) / 1000).toFixed(0) + 's')
+}
 
 if (require.main === module) {
   const args = process.argv.slice(2)
@@ -740,6 +1157,11 @@ if (require.main === module) {
     const i = args.indexOf(name)
     return i >= 0 ? args[i + 1] : fallback
   }
+  if (!args.includes('--chart')) {
+    mainRules(args, flag)
+    process.exit(0)
+  }
+
   const minN = 20
   const saved = fs.existsSync(OUT_FILE) ? JSON.parse(fs.readFileSync(OUT_FILE, 'utf8')) : {}
 
@@ -774,12 +1196,7 @@ if (require.main === module) {
   const rules = printRules(entries)
 
   const check = validate({ table, chart, rake, hands: 120000, seed: 777 })
-  console.log('\n  Against the plain fitted TAG on ' + check.hands.toLocaleString() +
-    ' fresh hands, same seats and draws:')
-  console.log('    chart ' + check.chart.bb100.toFixed(1) + ' +/- ' + check.chart.se.toFixed(1) +
-    '   tag ' + check.tag.bb100.toFixed(1) + ' +/- ' + check.tag.se.toFixed(1) +
-    '   difference ' + (check.diff.bb100 >= 0 ? '+' : '') + check.diff.bb100.toFixed(1) +
-    ' +/- ' + check.diff.se.toFixed(1) + ' bb/100')
+  printCheck(check, 'chart')
 
   saved[fieldName] = {
     generated: new Date().toISOString(),

@@ -72,24 +72,66 @@ const handCards = (idx) => {
 
 // ----------------------------------------------------------------- outs
 //
-// A card that improves the category of the hand. This is what a player means
-// by an out: not "a card that makes me a favourite" but "a card that makes my
-// hand better than it currently is". Counting them by testing every unseen
-// card is both exact and cheap -- about forty evaluations, against the
-// thousands a rollout would cost.
+// A card that improves the hand by more than it improves the board. This is
+// what a player means by an out: the flush card, the straight card, the card
+// that pairs an overcard or turns a set into a boat -- not a card that pairs
+// the board, which gives the same pair to everybody. Counting them by testing
+// every unseen card is both exact and cheap -- about forty evaluations,
+// against the thousands a rollout would cost.
+//
+// The first version counted any card that raised the hand's category, board
+// pairs included, and every hand on every flop was drawing to something: a
+// hand with no pair averaged 16.6 outs, which the rule of four reads as 66%
+// equity, and that beat its real made-hand strength (0.30) every time. Nobody
+// folded a flop with two unpaired cards, and no read of a bettor's range could
+// change it, because the draw term was not read against anybody.
+//
+// So a card is an out when the hand gains on the board: its category above
+// the board's own is larger after the card than before. Going from nothing to
+// a pair only counts for a pair above the board -- the two overcards of "six
+// outs", not the bottom pair nobody counts.
+const boardCategory = (cards) => {
+  if (cards.length >= 5) return evaluate(cards) >> 20
+  const counts = new Uint8Array(13)
+  let pairs = 0
+  let most = 0
+  for (const c of cards) {
+    const n = ++counts[c >> 2]
+    if (n === 2) pairs++
+    if (n > most) most = n
+  }
+  if (most === 4) return 7
+  if (most === 3) return pairs > 1 ? 6 : 3
+  return pairs >= 2 ? 2 : pairs
+}
+
 const countOuts = (hole, board) => {
   const seen = new Uint8Array(52)
   for (const c of hole) seen[c] = 1
-  for (const c of board) seen[c] = 1
+  let top = 0
+  for (const c of board) {
+    seen[c] = 1
+    if ((c >> 2) > top) top = c >> 2
+  }
 
-  const current = evaluate(hole.concat(board)) >> 20
   const seven = hole.concat(board)
+  const shared = board.slice()
+  const current = evaluate(seven) >> 20
+  const lead = current - boardCategory(board)
   let outs = 0
   for (let c = 0; c < 52; c++) {
     if (seen[c]) continue
     seven.push(c)
-    if ((evaluate(seven) >> 20) > current) outs++
+    const now = evaluate(seven) >> 20
     seven.pop()
+    if (now <= current) continue
+    shared.push(c)
+    const boardNow = boardCategory(shared)
+    shared.pop()
+    const gain = now - boardNow - lead
+    if (gain <= 0) continue
+    if (lead === 0 && gain === 1 && now <= 2 && (c >> 2) <= top) continue
+    outs++
   }
   return outs
 }
@@ -321,8 +363,11 @@ const rangeEquity = (idx, pct) => {
 // gets the same answer. The variability in what they *do* belongs to the
 // decision rule, not to the estimate.
 //
-// `range`, preflop only, is how wide the player reads the last raiser's range,
-// as a percentage of hands -- null when nobody has raised. See rangeEquity.
+// `range` is the read on the opponent whose line says the most. Preflop it is
+// how wide the last raiser's range is, as a percentage of hands -- null when
+// nobody has raised; see rangeEquity. After the flop it is the fraction of
+// holdings on this board that opponent would play the way they have, 1 (or
+// null) for no read at all.
 const estimateEquity = (hole, board, opponents, skill = 1, range = null) => {
   if (board.length === 0) {
     const idx = handIndex(hole[0], hole[1])
@@ -356,10 +401,18 @@ const estimateEquity = (hole, board, opponents, skill = 1, range = null) => {
   const informed = boardStrength(hole, board)
   const percentile = naive + skill * (informed - naive)
 
+  // Against the opponent with a line, the hand has to beat the top `range` of
+  // holdings rather than all of them: a hand that beats 85% of holdings beats
+  // (0.85 - 0.45) / 0.55 = 73% of the top 55%, and none of the top 15%. That
+  // is the read "he bet twice, my middle pair is no good", and a weak player
+  // makes it less -- they believe a random hand bet into them, just as before
+  // the flop they believe a random hand raised.
+  const read = range !== null && range < 1 ? range + (1 - skill) * (1 - range) : 1
+  const againstLine = read < 1 ? Math.max(0, (percentile - (1 - read)) / read) : percentile
+
   // Against several opponents every one of them has to be beaten. A skilled
   // player discounts for the field; an unskilled one barely does.
-  const effectiveOpponents = 1 + (opponents - 1) * skill
-  const made = Math.pow(percentile, effectiveOpponents)
+  const made = againstLine * Math.pow(percentile, (opponents - 1) * skill)
 
   // Draws, priced with the rule of 2 and 4: each out is worth about 4% with
   // two cards to come and about 2% with one. A weak player inflates the count.

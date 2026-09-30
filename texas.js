@@ -576,6 +576,32 @@ const runTests = () => {
     }
   }
 
+  // Outs are what every player's draw equity is built from, and the first
+  // count got them badly wrong without any statistic noticing: it counted
+  // cards that pair the board, so every unpaired hand on every flop "had" a
+  // dozen outs and nobody ever folded one. These are the counts a player at
+  // the table would give.
+  console.log('\nOuts, counted the way a player counts them')
+  {
+    const { countOuts } = require('./texas-equity')
+    const cards = (s) => s.split(' ').map((x) => '23456789TJQKA'.indexOf(x[0]) * 4 + 'cdhs'.indexOf(x[1]))
+    const cases = [
+      ['Ah Kh', '7h 5h 2c', 15, 'nut flush draw and two overcards'],
+      ['9s 8d', 'Jc 7h 2s', 4, 'gutshot, cards below the board'],
+      ['9s 8d', '7c 6h 2s', 14, 'open-ended, both cards over the board'],
+      ['4d 3c', 'Kh 9s 7c', 0, 'two undercards: pairing the board is nobody\'s out'],
+      ['Kd 7c', 'Kh 9s 2c', 5, 'top pair: kicker and trips'],
+      ['9d 9c', 'Kh 7s 2c', 2, 'underpair to a set'],
+      ['7d 7c', '7h Ks 2c', 7, 'a set to a full house or quads'],
+      ['Ad Kc', '9h 9s 4c', 6, 'overcards on a paired board']
+    ]
+    for (const [hole, board, want, label] of cases) {
+      const got = countOuts(cards(hole), cards(board))
+      check('outs: ' + label, got === want, hole + ' on ' + board + ': ' + got + ', want ' + want)
+    }
+    console.log('  ' + cases.length + ' hands')
+  }
+
   console.log(failures === 0 ? '\nAll checks passed.' : '\n' + failures + ' CHECK(S) FAILED')
   return failures
 }

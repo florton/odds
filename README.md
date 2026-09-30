@@ -27,10 +27,14 @@ interesting engineering is about making those errors small enough to say somethi
   error bars by up to **29.7x**, and duplicate dealing cancels card luck.
 - **A Hold'em field fitted to real population statistics, then asked who wins.**
   Five archetypes whose constants are fitted until the simulated table
-  reproduces tracked VPIP/PFR/AF/WTSD; at the fitted table the money is
-  nearly even -- two TAGs win, the calling station is a marginal loser -- and
-  at fixed style every step of proficiency from 0.25 to 1.0 is worth more
-  money than the one before.
+  reproduces tracked frequencies *and* the statistics that show money moving
+  (fold to a c-bet, W$SD, fold to a 3-bet); the fish lose to the regulars at
+  tens of bb/100, and at fixed style every step of proficiency from 0.25 to
+  1.0 is worth more money than the one before.
+- **A preflop rule solver** that answers in the form a player carries --
+  "raise the top X% from this seat" -- with the noise on every cutoff. Its
+  main result so far is diagnostic: each exploit it found was a hole in the
+  field the fit statistics had missed.
 
 ## Quick start
 
@@ -48,6 +52,8 @@ node texas.js --test               # engine invariant checks
 node texas-eval.js --enumerate     # verify the evaluator on all 133M seven-card hands
 node texas-calibrate.js --check    # how well the players match real statistics
 node texas-results.js              # who wins, with error bars   -> results.json
+node texas-strategy.js             # solve preflop rules vs the realistic field -> rules.json
+node texas-strategy.js --agree --cross   # compare saved fields' rules, replay each in the others
 
 node deal.js                       # Monty Hall, 10M runs
 ```
@@ -134,6 +140,7 @@ bugs fixed along the way (see the [changelog](CHANGELOG.md)).
 | `texas-players.js` | The player model: personality traits × proficiency. |
 | `texas-calibrate.js` | Fits the model's constants to real population statistics. |
 | `texas-results.js` | The experiments below. |
+| `texas-strategy.js` | Solves preflop rules ("raise the top X% from this seat") as a best response to a fitted field, by forced replays on common random numbers. |
 | `texas.js` | Measurement harness: bb/100 with standard errors, paired comparison, duplicate dealing, engine tests. |
 
 **Personality and skill are separate dials.** Personality biases the value of each action
@@ -155,27 +162,43 @@ blackjack one failed. VPIP over 8,000 hands has a standard deviation of 0.07; bb
 the same hands has a standard error near 20. Every candidate is also graded on identical
 seeded deals, so two parameter sets that play the same score the same to the bit.
 
-The fit lands close enough to name the types, measured over 8,000-hand samples
-on deals the search never optimised against (stable across seeds -- VPIP moves
-only ±0.1 between them):
+Frequencies alone turned out not to be enough. A field fitted only to how often
+players act paid off everything after the flop -- aces won half a stack each
+time they were dealt -- so the fit also carries the statistics that show money
+moving: c-bet, fold to a c-bet and to a turn c-bet, fold when a bet is raised,
+W$SD (won money at showdown), the preflop responses (3-bet, fold to a 3-bet or
+4-bet, fold to a steal), and a loose win-rate band for the two fish. Most are
+bands rather than points, because published figures for them vary by site and
+stake. The [changelog](CHANGELOG.md) has how each one was found missing.
 
-| Type | VPIP | PFR | AF | WTSD |
-|---|---|---|---|---|
-| nit | 11.7 / 13 | 10.5 / 10 | 2.2 / 2.2 | 23.4 / 24 |
-| tag | 24.0 / 22 | 18.2 / 19 | 2.5 / 2.6 | 27.5 / 26 |
-| lag | 31.4 / 32 | 24.8 / 25 | 3.0 / 3.2 | 31.4 / 29 |
-| station | 49.5 / 45 | 5.8 / 6 | 0.6 / 0.6 | 37.9 / 42 |
-| maniac | 67.8 / 62 | 40.0 / 38 | 2.1 / 2.4 | 31.2 / 36 |
+The neutral regulars the value model is fitted on, measured on deals the
+search never saw:
+
+| VPIP | PFR | AF | WTSD | C-bet | Fold to c-bet | Fold to turn c-bet | W$SD | 3-bet | Fold to 3-bet |
+|---|---|---|---|---|---|---|---|---|---|
+| 22.3 / 22 | 15.6 / 18 | 2.4 / 2.5 | 21.7 / 26 | 50.5 / 55-75 | 41.6 / 38-55 | 45.7 / 35-50 | 51.2 / 48-56 | 5.9 / 5-9 | 56.2 / 45-65 |
+
+They open-limp 1.5% of hands, fold to a 4-bet 66% of the time and to a steal
+59%, and 62% of hands end before a flop. What misses: c-bets run a few points
+short, and they fold a raised bet 28% of the time against a band of 35-60.
+
+The named types, averaged over three held-out seeds:
+
+| Type | VPIP | PFR | AF | WTSD | Fold to c-bet | W$SD | Fold to 3-bet | bb/100 |
+|---|---|---|---|---|---|---|---|---|
+| nit | 16.2 / 13 | 10.2 / 10 | 2.1 / 2.2 | 20.0 / 24 | 37.8 / 50-70 | 59.6 / 52-62 | 88.8 / 55-75 | +7.7 |
+| tag | 23.8 / 22 | 18.0 / 19 | 2.4 / 2.6 | 20.9 / 26 | 51.7 / 38-55 | 55.7 / 48-56 | 52.5 / 45-65 | +31.8 |
+| lag | 25.2 / 32 | 16.5 / 25 | 3.3 / 3.2 | 20.0 / 29 | 35.9 / 33-50 | 50.1 / 46-54 | 41.1 / 35-55 | +22.1 |
+| station | 38.3 / 45 | 5.2 / 6 | 0.9 / 0.6 | 20.0 / 42 | 41.1 / 20-35 | 48.6 / 40-48 | 8.7 / 20-45 | −55.9 |
+| maniac | 42.4 / 62 | 27.6 / 38 | 3.4 / 2.4 | 17.9 / 36 | 40.7 / 25-45 | 42.1 / 40-50 | 6.5 / 20-45 | −37.5 |
 
 *measured / target*
 
-The neutral regulars the value model was fitted on land at 23.9/17.2 VPIP/PFR
-against 22/18, aggression 2.5 on 2.5, WTSD 26.0 on 26, and 64% of hands end
-before a flop against a real ~60%. The calling station -- the type every
-earlier fit failed -- now lands at 49.5/45 with AF on target and WTSD 37.9
-against 42, and holds on fresh seeds: 50.3/50.4 VPIP, WTSD 36.6-37.1. What is
-left -- station WTSD still 4 short, the maniac 6 VPIP loose -- is said plainly
-in Limitations.
+The TAG is the best-fitted type it has ever been. The fish are not: they lose
+realistic amounts, but after the flop they fold like regulars, and the maniac
+plays 42% of hands against 62. A fit that made them call down like fish
+(station WTSD 32, fold to c-bet 17) had them losing 124-143 bb/100 and the TAG
+winning 138 -- see Limitations for that trade and why this one was kept.
 
 ### Who wins
 
@@ -188,63 +211,86 @@ only difference between them is style:
 
 | Player | bb/100 | ± SE |
 |---|---|---|
-| maniac | +130.1 | 7.8 |
-| neutral | −5.1 | 4.9 |
-| lag | −13.9 | 5.1 |
-| tag | −26.1 | 4.3 |
-| nit | −26.6 | 2.0 |
-| station | −58.5 | 6.6 |
+| lag | +31.5 | 2.8 |
+| tag | +23.8 | 2.1 |
+| neutral | +11.3 | 2.1 |
+| nit | +4.7 | 1.4 |
+| station | −33.5 | 2.8 |
+| maniac | −37.8 | 3.6 |
 
-Loose-aggressive styles win at equal execution and passive ones pay for them;
-34.5% of hands reach showdown. The honest caveat: this is what the *fitted*
-styles do -- the fit constrained how often they act, not how profitably, and
-the fitted maniac is sticky rather than bluffy, which at high proficiency
-plays like a strong LAG rather than a lottery player (see Limitations).
+Aggressive regular styles win at equal execution, and both fish lose even when
+they execute as well as everyone else; 17.6% of hands reach showdown. Before
+the money statistics entered the fit, the maniac *won* this table by +130.1
+bb/100: it was fitted on how often it acted, and it acted like a strong LAG.
 
 **2. Skill at equal personality.** Six neutral players differing only in
 proficiency:
 
 | Proficiency | 0.25 | 0.40 | 0.55 | 0.70 | 0.85 | 1.00 |
 |---|---|---|---|---|---|---|
-| bb/100 | −84.2 | −49.1 | −16.2 | +21.2 | +59.0 | +69.2 |
+| bb/100 | −61.0 | −29.4 | −19.9 | +11.7 | +41.9 | +56.7 |
 
-± ~4.7 each. Monotone at every step, and the best player clearly beats the
-worst; one proficiency step is worth roughly 20 bb/100 around the middle of
+± ~2.5 each. Monotone at every step, and the best player clearly beats the
+worst; one proficiency step is worth roughly 20-30 bb/100 around the middle of
 the ladder.
 
 **3. The realistic table.** The fitted types at the proficiencies they were
-fitted at (nit .70, tag .85, lag .64, station .63, maniac .49), no rake:
+fitted at (nit .68, tag .81, lag .60, station .54, maniac .49), no rake:
 
 | Player | bb/100 | ± SE |
 |---|---|---|
-| tag (2) | +43.0 | 4.4 |
-| maniac | +24.6 | 7.0 |
-| tag | +18.5 | 4.1 |
-| station | −8.3 | 6.1 |
-| lag | −35.0 | 5.1 |
-| nit | −42.9 | 2.4 |
+| tag | +50.1 | 2.5 |
+| tag (2) | +32.9 | 2.3 |
+| lag | +28.5 | 3.2 |
+| nit | +2.9 | 1.6 |
+| maniac | −56.8 | 3.8 |
+| station | −57.7 | 3.2 |
 
-The same table raked 5% capped at 3bb costs each seat **16.9 bb/100**: tag (2)
-+27.0, maniac +16.2, tag +7.9, nit −46.0, lag −47.0, station −59.9. The
-earlier version of this table had the station losing −152 bb/100 and the lag
-winning +90.8; closing the station's over-folding leak removed the money both
-numbers were made of, and the field's edges compress to a few bb/100 around
-two winning TAGs.
+The same table raked 5% capped at 3bb costs each seat **10.0 bb/100**: tag
++42.3, tag (2) +24.8, lag +10.4, nit −4.2, maniac −65.4, station −67.6. The
+money now flows the way it does at a real table, from the two fish to the
+regulars, and at rates of tens of bb/100 rather than the hundreds the fish
+lost before the money statistics were fitted.
 
-**4. Where the money comes from.** The button is the most profitable seat
-(+136.5 bb/100) and both blinds lose (SB −110.4, BB −80.4); later position
-earns more, CO > HJ > UTG; aces are the most profitable starting hand
-(+1015 bb/100 when dealt) and the top five are AA KK QQ JJ 99. Everyone loses
-from the blinds, and the station loses from every seat, worst of all the small
-blind (−123 bb/100).
+**4. Where the money comes from.** Both blinds lose (SB −80.4, BB −83.6),
+later position earns more (CO +51.2 > HJ +38.5 > UTG +26.0), and aces are
+the most profitable starting hand, then KK QQ JJ AKs. The fish lose from the
+blinds above all (station −183 and −174, maniac −197 and −150).
 
-Six of the ten shape checks pass. The four that fail, reported here and in
-Limitations rather than hidden: the top five starting hands are AA KK QQ JJ
-99, with 99 vs TT a coin flip (+451 ± 44 against +430 ± 42) and AKs sixth;
-the calling station's win rate is negative but does not clear the three-
-standard-error bar (−8.3 ± 6.1); the maniac's win rate is genuinely above
-zero (+24.6 ± 7.0); and a TAG does not clearly out-earn him, though the TAG
-does clearly beat the station (a 26.8 bb/100 gap against 22.1 needed).
+Nine of the eleven checks pass. The two that fail: the button (+48.3 ± 4.8)
+is not clearly ahead of the cutoff (+51.2 ± 3.7), and aces win **15.6 bb a
+hand**, where tracked databases put them at a few. That is down from 26.9 at
+the first refit and far down from the half-stack aces won before, but it is
+still the field paying off, and mostly the fish doing it: the TAGs' aces make
+about 25 bb a hand at the mixed table, the fish's own 7-15.
+
+### Preflop rules, and what they found
+
+`texas-strategy.js` asks the question a player asks: given this table, what
+should I do with this hand from this seat? It answers in the form a player can
+carry -- "raise the top X% from this seat, call the next Y%, fold the rest",
+for each seat and situation -- solved on 21 bands of the hand ranking by
+replaying each deal with the hero forced into each action on the same cards
+and the same random draws. Each cutoff comes with the stretch of the ranking
+where it is within noise, and each rule with what it costs against playing
+every band its own best action.
+
+The rules it solves are **not advice yet**, and the reason is the finding.
+Solved against the fitted field they limp a third to two thirds of hands,
+re-raise 25-50% of hands when raised, and beat the plain fitted TAG by
++77 to +158 bb/100 depending on the field -- and every field's rules win about
+as much in the other fields. Real edges over a competent regular are a few
+bb/100, so these are exploits of the model, and the solver found each one
+faster than any statistic did. Decomposed, most of the edge is one line:
+limp, and re-raise whoever isolates, with a hand the TAG would fold. The
+isolator folds 59% of the time -- inside the published fold-to-3-bet band --
+and when called, the junk loses only about a big blind after the flop. A
+real table would adapt to a player who limp-reraised half their hands inside
+an orbit; this field never adapts, and a best response to a static field
+exploits the fact. The earlier exploits it found (a TAG type that folded to
+3-bets 80% of the time, a station that called pot-sized river bets with
+nothing) were fixed in the model; this one is a limit of solving against a
+field that does not learn.
 
 ## Measuring honestly
 
@@ -270,27 +316,31 @@ attempt without it failed:
 
 ## Limitations
 
-**Hold'em.** The calling station is fitted now, but not for free. It lands at
-49.5/45 with WTSD 37.9 against 42, and getting there required the fit to make
-it bet: aggression from 0.10 to 0.33, bluffiness from 0.22 to 0.57, and a
-steadier hand (skill 0.63, fitted, now above the maniac's 0.49 -- a
-WTSD-42 calling station cannot be noisy in this model, because noise folds
-hands). A station that bets its made hands stops being a cash source: at the
-realistic table it is a marginal loser whose rate (−8.3 ± 6.1) does not clear
-the three-standard-error bar the shape checks demand. The WTSD residual
-(−4.1) and the price paid for the improvement -- the maniac traded loose,
-67.8/62 -- are left in the tables above rather than smoothed over, which is
-the honest record of an equal-weight objective. Behavioural targets do not
-pin down win rate, either: they constrain how often a type acts, not how
-profitably, and the fitted maniac -- sticky rather than bluffy -- wins at
-equal skill (+130.1) and at the realistic table (+24.6) where a real one
-would bleed. The old LAG figure is the same lesson from the other side:
-+90.8 bb/100 was funded by the station's excess folds and collapsed to
-−35.0 the moment the leak closed. The traits and pulls are a
-coordinate-descent optimum, so the answer depends on the path: two parameters
-(maxBias, pullStickiness) sat at values that made further improvement
-impossible until lifted off them mid-fit (`node texas-calibrate.js --resume`),
-and the maniac overshoot is the latest instance of the same myopia. Each
+**Hold'em.** The fish either look like fish or lose like fish, not both. In
+the fit kept here they lose realistic amounts (station −57.7, maniac −56.8 at
+the realistic table) but fold after the flop like regulars -- the station
+shows down 20% of the flops it sees against a target of 42 -- and the maniac
+plays 42% of hands against 62. A resumed fit that weighted each type's four
+defining statistics as half its error, started from a stickier station and a
+looser maniac (`--resume maxBias=0.9` with station `stickinessScale` 3 and
+maniac `looseness` 0.98), made them call down like fish (station WTSD 32,
+fold to a c-bet 17) and immediately had them losing 124-143 bb/100 with the
+TAG winning 138. Calling down in this model is badly aimed, so a fish that
+does it loses far faster than a real one; the fit that keeps the money
+realistic was kept. Aces still win 15.6 bb a hand, a few times the real
+figure, and the button does not clearly out-earn the cutoff.
+
+The preflop rules solved against this field exploit it rather than describe
+good play (see above): a static field that never adapts can be limp-reraised
+forever, and no statistic in the fit says otherwise. Behavioural targets --
+even money ones -- constrain what a field does on average; a best response
+finds whatever the averages leave out, and has found something new after
+every refit so far.
+
+The traits and pulls are a coordinate-descent optimum, so the answer depends
+on the path: four refits in a row landed in different places on the same
+targets, and parameters have repeatedly sat where no single-coordinate move
+helps until lifted off by hand (`node texas-calibrate.js --resume`). Each
 player has one sizing habit and no concept of balance, adaptation or
 exploitation, and the game is cash-only: no tournaments, buy-ins or ICM, so
 "stakes" enter only through the fitted constants and the rake settings.

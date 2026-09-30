@@ -56,7 +56,8 @@ const DEFAULT_TRAITS = {
 // The trait pulls are in units of the pot: at 0.35, a maximally aggressive
 // player will take a raise worth up to about a third of a pot less than its
 // best alternative. Large enough to produce real personalities, small enough
-// that nobody is playing at random.
+// that nobody is playing at random. The exception is stickiness after the
+// flop, which is in units of the price of the call (see applyTraits).
 const PARAMS = {
   // How hard each trait pulls on the value of an action.
   // Held fixed, not fitted: these and the archetype traits are the same
@@ -81,6 +82,12 @@ const PARAMS = {
   foldBase: 0.10,
   foldSlope: 0.55,
   stubbornness: 0.45,
+  // And how much more a continuation bet folds out: the preflop raiser's
+  // first bet on the flop, into a caller who misses most flops. It is why a
+  // regular c-bets two flops in three. Without it the fitted regulars c-bet
+  // 38% of the time, and the only way the search had to raise that -- more
+  // fold equity for every bet -- made everybody raise more and fold less.
+  initiative: 0.15,
 
   // How wide a player reads the last raiser's range before the flop, as a
   // percentage of all hands: an open is `rangeOpen`, each further raise
@@ -140,6 +147,24 @@ const PARAMS = {
   // Without this term, players facing a flop bet folded 10% of the time against
   // a real 50-60%, and 89% of flops ran to showdown.
   callShadePostBase: 0.30,
+
+  // The read on a line after the flop: what fraction of their holdings an
+  // opponent would play this way. Each bet narrows it to `postRange` of what it
+  // was, a raise over a bet counts `postRaiseWeight` bets, and a call counts
+  // `postCallWeight` -- "he bet, he has something; he bet twice, he has
+  // something good; he raised, he has it". Equity is then read against that
+  // range (texas-equity.js), the way the preflop read works against a raiser.
+  //
+  // The flat shade above cannot do this, and it was where the field's money
+  // leaked. It discounts a bet by the same amount on every street and at every
+  // raise, so top pair called a flop bet, a turn bet, a raise and a shove the
+  // same way: regulars folded 22% of flop bets against a real ~45%, a third of
+  // the mixed table's hands ended in a 100bb pot, and aces won half a stack
+  // every time they were dealt. VPIP, PFR, AF and WTSD all sat on target
+  // throughout -- they count how often a player acts, not what it costs.
+  postRange: 0.55,
+  postRaiseWeight: 2,
+  postCallWeight: 0.4,
 
   // Reverse implied odds, per street still to come.
   //
@@ -293,7 +318,17 @@ const actionValues = (v, equity, opponents, sizing = 0.6) => {
     }
     const stubbornness = Math.pow(PARAMS.stubbornness, raisesThisStreet)
 
-    const perOpponent = Math.min(0.7, PARAMS.foldBase + PARAMS.foldSlope * price) * (1 - commitment) * stubbornness
+    // A continuation bet: first to bet the flop, having made the last raise
+    // before it.
+    let initiative = 0
+    if (v.street === 'flop' && toCall === 0) {
+      let raiser = -1
+      for (const a of v.history) if (a.street === 'preflop' && a.type === 'raise') raiser = a.seat
+      if (raiser === v.seat) initiative = PARAMS.initiative
+    }
+
+    const perOpponent = Math.min(0.7, PARAMS.foldBase + PARAMS.foldSlope * price + initiative) *
+      (1 - commitment) * stubbornness
     const foldsOut = Math.pow(Math.max(0, perOpponent), Math.max(1, opponents))
 
     // And when the raise *is* called, the caller is not holding a random hand
@@ -313,7 +348,7 @@ const actionValues = (v, equity, opponents, sizing = 0.6) => {
 //
 // Biases are added to the value of each action, in chips, scaled by the pot so
 // that a personality is equally opinionated in a big pot and a small one.
-const applyTraits = (values, traits, equity, pot, tiltLevel, preflop) => {
+const applyTraits = (values, traits, equity, pot, tiltLevel, preflop, toCall = 0) => {
   const out = { ...values }
   // Aggression is split by street, for the same reason calling was: PFR and AF
   // are tracked separately because they are separate habits. As one trait it
@@ -356,8 +391,18 @@ const applyTraits = (values, traits, equity, pot, tiltLevel, preflop) => {
     // equity): looseness is about which marginal hands a player takes on,
     // and nobody's personality decides whether to play aces. As a flat bias
     // it let a tight enough nit fold AA to a raise.
+    //
+    // After the flop, stickiness makes a call feel cheaper than it is: a
+    // fraction of the price is waved away. It used to be a flat bonus in
+    // pots, and a pot counts the bet being faced, so for the fitted station
+    // the bonus (0.54 pots) was larger than the whole price of calling a
+    // pot-sized bet -- it called a river bet holding nothing, and aces won
+    // 27 big blinds a hand at the realistic table. A real station calls with
+    // any pair and folds air. Scaled by the price, the discount still makes
+    // weak made hands call, but a hand with no equity cannot profit from a
+    // call until the discount reaches the whole price.
     if (preflop) out.call += pot * (looseness - 0.5) * PARAMS.pullLooseness * 2 * (1 - equity)
-    else out.call += pot * (traits.stickiness - 0.5) * PARAMS.pullStickiness * 2 *
+    else out.call += toCall * (traits.stickiness - 0.5) * PARAMS.pullStickiness * 2 *
       (traits.stickinessScale || 1)
   }
   if (out.check !== undefined) {
@@ -474,6 +519,32 @@ const raiserRange = (v) => {
   const pct = PARAMS.rangeOpen * Math.pow(PARAMS.rangeStep, raises - 1) *
     Math.pow(Math.min(1, 3 / size), PARAMS.rangeSizeExp)
   return Math.max(1, Math.min(100, pct))
+}
+
+// The same read after the flop, on whichever live opponent's line says the
+// most: the fraction of their holdings (on this board) they would play this
+// way, 1 when nothing they have done after the flop says anything. Weighted
+// by what each action tells a player at the table -- a bet, a raise over a
+// bet, a call -- and read off the history, which is all anyone at the table
+// has to go on.
+const lineRange = (v) => {
+  const weight = new Array(v.numPlayers).fill(0)
+  const bets = { flop: 0, turn: 0, river: 0 }
+  for (const a of v.history) {
+    if (a.street === 'preflop') continue
+    if (a.type === 'raise') {
+      weight[a.seat] += bets[a.street] > 0 ? PARAMS.postRaiseWeight : 1
+      bets[a.street]++
+    } else if (a.type === 'call') {
+      weight[a.seat] += PARAMS.postCallWeight
+    }
+  }
+  let most = 0
+  for (let s = 0; s < v.numPlayers; s++) {
+    if (s === v.seat || !v.inHand[s] || v.folded[s]) continue
+    if (weight[s] > most) most = weight[s]
+  }
+  return Math.pow(PARAMS.postRange, most)
 }
 
 // ---------------------------------------------------------- before the flop
@@ -604,7 +675,7 @@ const makePlayer = (name, { traits = {}, proficiency = 0.5, rng = Math.random } 
         // Proficiency first degrades the read on the hand, before it is used
         // for anything. A weak player is not making good decisions noisily --
         // they are making decisions on a wrong number.
-        equity = estimateEquity(v.holeCards, v.board, opponents, proficiency)
+        equity = estimateEquity(v.holeCards, v.board, opponents, proficiency, lineRange(v))
         // Sticky players overvalue made hands -- a station calls down with
         // any pair and bets it, which is why the bonus lifts both calls and
         // bets where a raw stickiness bias only lifts calls. Symmetric about
@@ -618,7 +689,7 @@ const makePlayer = (name, { traits = {}, proficiency = 0.5, rng = Math.random } 
         }
         base = actionValues(v, equity, opponents, t.sizing)
       }
-      const biased = applyTraits(base, t, equity, v.pot, player.tiltLevel, preflop)
+      const biased = applyTraits(base, t, equity, v.pot, player.tiltLevel, preflop, v.toCall)
       const pick = choose(biased, proficiency, Math.max(v.bigBlind, v.pot), rng,
         preflop ? PARAMS.temperaturePre : PARAMS.temperature)
 
@@ -718,9 +789,82 @@ const makeTracker = (numPlayers) => {
     hands: 0, vpip: 0, pfr: 0, bets: 0, calls: 0, folds: 0,
     sawFlop: 0, showdowns: 0, won: 0, chips: 0,
     threeBetOpp: 0, threeBet: 0, foldTo3betOpp: 0, foldTo3bet: 0,
-    stealOpp: 0, foldToSteal: 0, premiumOpp: 0, premiumFold: 0
+    stealOpp: 0, foldToSteal: 0, premiumOpp: 0, premiumFold: 0,
+    foldTo4betOpp: 0, foldTo4bet: 0,
+    cbetOpp: 0, cbet: 0, foldToCbetOpp: 0, foldToCbet: 0,
+    foldToTurnCbetOpp: 0, foldToTurnCbet: 0, showdownsWon: 0,
+    limpOpp: 0, limp: 0, foldToRaiseOpp: 0, foldToRaise: 0
   })
   const stats = Array.from({ length: numPlayers }, blank)
+
+  // The postflop statistics that say what a line costs, not just how often it
+  // is taken, counted the way a tracker counts them:
+  //
+  //   c-bet              the preflop raiser bet the flop, when it was theirs
+  //                      to bet
+  //   fold to c-bet      folded to that bet, before anybody raised it
+  //   fold to turn c-bet the same raiser bet the turn after c-betting the flop
+  //   fold to raise      bet, got raised on the same street, folded
+  //
+  // With W$SD (won money at showdown) these are what show a field paying off.
+  // A player who never folds to a bet reaches its WTSD target all the same --
+  // and then loses the showdowns it should have folded before. Fold to raise
+  // is the same question at the top of the range: a raise after the flop is
+  // usually the goods, and a field that calls it three times in four pays off
+  // every set.
+  const recordPostflop = (result) => {
+    for (const street of ['flop', 'turn', 'river']) {
+      const bet = new Set()
+      const counted = new Set()
+      let last = -1
+      for (const a of result.actions) {
+        if (a.street !== street) continue
+        if (bet.has(a.seat) && a.seat !== last && a.toCall > 0 && !counted.has(a.seat)) {
+          counted.add(a.seat)
+          stats[a.seat].foldToRaiseOpp++
+          if (a.type === 'fold') stats[a.seat].foldToRaise++
+        }
+        if (a.type === 'raise') {
+          bet.add(a.seat)
+          last = a.seat
+        }
+      }
+    }
+    let raiser = -1
+    for (const a of result.actions) {
+      if (a.street === 'preflop' && a.type === 'raise') raiser = a.seat
+    }
+    if (raiser < 0) return
+    for (const street of ['flop', 'turn']) {
+      let bets = 0
+      let offered = false
+      let cbet = false
+      const faced = new Set()
+      for (const a of result.actions) {
+        if (a.street !== street) continue
+        if (a.seat === raiser && bets === 0 && !offered) {
+          offered = true
+          if (street === 'flop') stats[raiser].cbetOpp++
+          if (a.type === 'raise') {
+            cbet = true
+            if (street === 'flop') stats[raiser].cbet++
+          }
+        } else if (cbet && bets === 1 && a.toCall > 0 && !faced.has(a.seat)) {
+          faced.add(a.seat)
+          const st = stats[a.seat]
+          if (street === 'flop') {
+            st.foldToCbetOpp++
+            if (a.type === 'fold') st.foldToCbet++
+          } else {
+            st.foldToTurnCbetOpp++
+            if (a.type === 'fold') st.foldToTurnCbet++
+          }
+        }
+        if (a.type === 'raise') bets++
+      }
+      if (!cbet) return
+    }
+  }
 
   // The preflop response statistics, each counted over its own opportunities
   // the way a tracker counts them. These exist because VPIP and PFR say how
@@ -732,17 +876,26 @@ const makeTracker = (numPlayers) => {
   //   fold to 3-bet opened, got re-raised, folded
   //   fold to steal in the big blind against a lone open from CO/BTN/SB
   //   premium fold  folded AA or KK to a bet -- which real players do not do
+  //   limp          called in an unopened pot, first in or behind limpers --
+  //                 the big blind's free check is not a limp
+  //   fold to 4-bet 3-bet, got 4-bet, folded
   const recordResponses = (result) => {
     const n = numPlayers
     const once = new Set()
     let raises = 0
     let opener = -1
+    let threeBettor = -1
     let calledOpen = false
     let limped = false
     for (const a of result.actions) {
       if (a.street !== 'preflop') break
       const s = a.seat
       const st = stats[s]
+      if (raises === 0 && a.toCall > 0 && !once.has('lp' + s)) {
+        once.add('lp' + s)
+        st.limpOpp++
+        if (a.type === 'call') st.limp++
+      }
       if (raises === 1 && s !== opener && !once.has('3b' + s)) {
         once.add('3b' + s)
         st.threeBetOpp++
@@ -752,6 +905,11 @@ const makeTracker = (numPlayers) => {
         once.add('f3' + s)
         st.foldTo3betOpp++
         if (a.type === 'fold') st.foldTo3bet++
+      }
+      if (raises === 3 && s === threeBettor && !once.has('f4' + s)) {
+        once.add('f4' + s)
+        st.foldTo4betOpp++
+        if (a.type === 'fold') st.foldTo4bet++
       }
       const pos = (s - result.button + n) % n
       const openerPos = (opener - result.button + n) % n
@@ -768,6 +926,7 @@ const makeTracker = (numPlayers) => {
       if (a.type === 'raise') {
         raises++
         if (raises === 1) opener = s
+        if (raises === 2) threeBettor = s
       } else if (a.type === 'call' && raises === 1) {
         calledOpen = true
       } else if (a.type === 'call' && raises === 0) {
@@ -780,6 +939,7 @@ const makeTracker = (numPlayers) => {
     stats,
     record: (result) => {
       recordResponses(result)
+      recordPostflop(result)
       const voluntary = new Array(numPlayers).fill(false)
       const raisedPre = new Array(numPlayers).fill(false)
       const foldedPre = new Array(numPlayers).fill(false)
@@ -814,8 +974,12 @@ const makeTracker = (numPlayers) => {
         if (raisedPre[s]) stats[s].pfr++
         if (flopDealt && !foldedPre[s]) stats[s].sawFlop++
         stats[s].chips += result.deltas[s]
-        if (result.wentToShowdown && !result.folded[s]) stats[s].showdowns++
-        if (result.winners.some((w) => w.seat === s)) stats[s].won++
+        const won = result.winners.some((w) => w.seat === s)
+        if (result.wentToShowdown && !result.folded[s]) {
+          stats[s].showdowns++
+          if (won) stats[s].showdownsWon++
+        }
+        if (won) stats[s].won++
       }
     },
     summary: (names, bigBlind) => stats.map((st, i) => ({
@@ -836,8 +1000,15 @@ const makeTracker = (numPlayers) => {
       bb100: st.hands ? (st.chips / bigBlind / st.hands) * 100 : 0,
       threeBet: st.threeBetOpp ? (st.threeBet / st.threeBetOpp) * 100 : 0,
       foldTo3bet: st.foldTo3betOpp ? (st.foldTo3bet / st.foldTo3betOpp) * 100 : 0,
+      foldTo4bet: st.foldTo4betOpp ? (st.foldTo4bet / st.foldTo4betOpp) * 100 : 0,
       foldToSteal: st.stealOpp ? (st.foldToSteal / st.stealOpp) * 100 : 0,
-      premiumFold: st.premiumOpp ? (st.premiumFold / st.premiumOpp) * 100 : 0
+      premiumFold: st.premiumOpp ? (st.premiumFold / st.premiumOpp) * 100 : 0,
+      cbet: st.cbetOpp ? (st.cbet / st.cbetOpp) * 100 : 0,
+      foldToCbet: st.foldToCbetOpp ? (st.foldToCbet / st.foldToCbetOpp) * 100 : 0,
+      foldToTurnCbet: st.foldToTurnCbetOpp ? (st.foldToTurnCbet / st.foldToTurnCbetOpp) * 100 : 0,
+      wsd: st.showdowns ? (st.showdownsWon / st.showdowns) * 100 : 0,
+      limp: st.limpOpp ? (st.limp / st.limpOpp) * 100 : 0,
+      foldToRaise: st.foldToRaiseOpp ? (st.foldToRaise / st.foldToRaiseOpp) * 100 : 0
     }))
   }
 }

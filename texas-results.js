@@ -256,6 +256,13 @@ if (require.main === module) {
     check('the top five hands are big pairs and AK',
       hands.slice(0, 5).every((h) => ['AA', 'KK', 'QQ', 'JJ', 'TT', 'AKs', 'AKo'].includes(h.hand)),
       hands.slice(0, 5).map((h) => h.hand).join(' '))
+    // Tracked databases put aces at a few big blinds a hand. The ordering
+    // checks above passed while aces won half a stack every time they were
+    // dealt, because a field that pays off everything still pays off aces
+    // most -- so the size is checked as well as the rank, and generously.
+    const aces = hands.find((h) => h.hand === 'AA')
+    check('aces win a few big blinds a hand, not tens', aces.bb100 < 1000,
+      (aces.bb100 / 100).toFixed(1) + ' bb a hand')
     const byName = (name) => rows.find((r) => r.name === name)
     check('the calling station loses', byName('station').bb100 + 3 * byName('station').se < 0,
       fmt(byName('station').bb100))

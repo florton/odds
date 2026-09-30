@@ -1,80 +1,84 @@
 {
   "params": {
-    "pullAggression": 0.7633074549942017,
+    "pullAggression": 0.8062434993376255,
     "pullLooseness": 1.2232032669996509,
-    "pullStickiness": 0.5703626220703124,
-    "pullBluffiness": 0.7208699433633746,
-    "handOvervalue": 0,
-    "foldBase": 0.15045635315944766,
-    "foldSlope": 0.2955235937500001,
-    "stubbornness": 0.24196288155760787,
-    "rangeOpen": 25.878125,
-    "rangeStep": 0.32615625,
-    "rangeSizeExp": 0.1683898755614517,
-    "enterRate": 0.32615625,
-    "raiseBehind": 0.147,
-    "openBase": 55.12500000000001,
-    "openDecay": 0.5053125,
-    "limpedMult": 1.1025,
-    "limpGap": 0.07815500000000002,
-    "chartScale": 1.6500000000000001,
-    "threeBetEq": 0.547375,
-    "callShadePost": 0.054442594723328123,
+    "pullStickiness": 0.6080102104049876,
+    "pullBluffiness": 0.8954837917538547,
+    "handOvervalue": 0.0054578979492187416,
+    "foldBase": 0.061717456419709424,
+    "foldSlope": 0.24571603210801898,
+    "stubbornness": 0.2036580874416842,
+    "initiative": 0.24449966726054545,
+    "rangeOpen": 20.055546875,
+    "rangeStep": 0.13298191289689615,
+    "rangeSizeExp": 0.06223225100605409,
+    "enterRate": 0.25277109375,
+    "raiseBehind": 0.13873125,
+    "openBase": 52.33429687500001,
+    "openDecay": 0.3675,
+    "limpedMult": 1.1625,
+    "limpGap": 0.11071119795312502,
+    "chartScale": 2.3925,
+    "threeBetEq": 0.5165851562499999,
+    "callShadePost": 0.041944339496159645,
     "raiseShade": 0.599312109375,
-    "callShadePostBase": 0.2019630473561648,
-    "futureCost": 0.14213592957148924,
-    "temperature": 1.3609687061920712,
+    "callShadePostBase": 0.09673998411634145,
+    "postRange": 0.6737500000000001,
+    "postRaiseWeight": 1.4232968750000001,
+    "postCallWeight": 0.04112608729770104,
+    "futureCost": 0.18970067760995013,
+    "temperature": 1.284414216468767,
     "temperaturePre": 0.6,
     "temperatureCurve": 0.5760967041015623,
-    "pullPosition": 0.9765416252197265,
-    "positionPostWeight": 0.6707702050720845,
-    "maxBias": 1.1
+    "pullPosition": 0.5370978938708496,
+    "positionPostWeight": 0.3689236127896465,
+    "maxBias": 0.5374916026747505
   },
   "archetypes": {
     "nit": {
-      "looseness": 0.38,
-      "preflopAggression": 0.44000000000000006,
-      "aggression": 0.5225000000000001,
-      "stickiness": 0.4349999999999999,
-      "bluffiness": 0.2025,
-      "skill": 0.8799999999999999,
-      "stickinessScale": 0.7364141689872057
+      "looseness": 0.26,
+      "preflopAggression": 0.32000000000000006,
+      "aggression": 0.4025000000000001,
+      "stickiness": 0.06499999999999981,
+      "bluffiness": 0.060000000000000005,
+      "skill": 0.6799999999999999,
+      "stickinessScale": 0.6427980883235365
     },
     "tag": {
-      "looseness": 0.6100000000000001,
-      "preflopAggression": 0.57,
-      "aggression": 0.5825,
-      "stickiness": 0.4749999999999999,
-      "bluffiness": 0.4549999999999999,
-      "skill": 0.95,
-      "stickinessScale": 0.9959976269482427
+      "looseness": 0.5100000000000001,
+      "preflopAggression": 0.53,
+      "aggression": 0.4625000000000001,
+      "stickiness": 0.2749999999999999,
+      "bluffiness": 0.05,
+      "skill": 0.8099999999999999,
+      "stickinessScale": 1.0083447049682621
     },
     "lag": {
-      "looseness": 0.6699999999999999,
-      "preflopAggression": 0.4899999999999998,
-      "aggression": 0.71,
-      "stickiness": 0.6774999999999999,
-      "bluffiness": 0.98,
-      "skill": 0.7999999999999999,
-      "stickinessScale": 0.25
+      "looseness": 0.47,
+      "preflopAggression": 0.46999999999999986,
+      "aggression": 0.5499999999999999,
+      "stickiness": 0.37749999999999984,
+      "bluffiness": 0.785,
+      "skill": 0.6,
+      "stickinessScale": 0.4173613281250001
     },
     "station": {
-      "looseness": 0.9,
-      "preflopAggression": 0.42,
-      "aggression": 0.5275,
-      "stickiness": 0.98,
-      "bluffiness": 0.6050000000000001,
-      "skill": 0.75,
-      "stickinessScale": 0.948108474414063
+      "looseness": 0.78,
+      "preflopAggression": 0.30499999999999994,
+      "aggression": 0.3275,
+      "stickiness": 0.78,
+      "bluffiness": 0.43000000000000016,
+      "skill": 0.535,
+      "stickinessScale": 1.0678463473449713
     },
     "maniac": {
-      "looseness": 0.98,
-      "preflopAggression": 0.86,
-      "aggression": 0.8099999999999998,
-      "stickiness": 0.94,
-      "bluffiness": 0.7525000000000002,
-      "skill": 0.69,
-      "stickinessScale": 0.865237382324219
+      "looseness": 0.78,
+      "preflopAggression": 0.7400000000000001,
+      "aggression": 0.6099999999999999,
+      "stickiness": 0.74,
+      "bluffiness": 0.5825000000000001,
+      "skill": 0.49,
+      "stickinessScale": 0.715072216796875
     }
   },
   "targets": {
@@ -99,6 +103,34 @@
       "premiumFold": [
         0,
         1
+      ],
+      "foldTo4bet": [
+        50,
+        75
+      ],
+      "cbet": [
+        55,
+        75
+      ],
+      "foldToCbet": [
+        38,
+        55
+      ],
+      "foldToTurnCbet": [
+        35,
+        50
+      ],
+      "wsd": [
+        48,
+        56
+      ],
+      "foldToRaise": [
+        35,
+        60
+      ],
+      "limp": [
+        0,
+        6
       ]
     },
     "field": {
@@ -110,6 +142,30 @@
         "premiumFold": [
           0,
           2
+        ],
+        "foldToCbet": [
+          50,
+          70
+        ],
+        "wsd": [
+          52,
+          62
+        ],
+        "limp": [
+          0,
+          8
+        ],
+        "threeBet": [
+          2,
+          5
+        ],
+        "foldTo3bet": [
+          55,
+          75
+        ],
+        "foldToSteal": [
+          65,
+          85
         ]
       },
       "tag": {
@@ -120,6 +176,30 @@
         "premiumFold": [
           0,
           2
+        ],
+        "foldToCbet": [
+          38,
+          55
+        ],
+        "wsd": [
+          48,
+          56
+        ],
+        "limp": [
+          0,
+          8
+        ],
+        "threeBet": [
+          5,
+          9
+        ],
+        "foldTo3bet": [
+          45,
+          65
+        ],
+        "foldToSteal": [
+          45,
+          70
         ]
       },
       "lag": {
@@ -130,6 +210,26 @@
         "premiumFold": [
           0,
           2
+        ],
+        "foldToCbet": [
+          33,
+          50
+        ],
+        "wsd": [
+          46,
+          54
+        ],
+        "threeBet": [
+          8,
+          14
+        ],
+        "foldTo3bet": [
+          35,
+          55
+        ],
+        "foldToSteal": [
+          35,
+          60
         ]
       },
       "station": {
@@ -140,6 +240,30 @@
         "premiumFold": [
           0,
           2
+        ],
+        "foldToCbet": [
+          20,
+          35
+        ],
+        "wsd": [
+          40,
+          48
+        ],
+        "bb100": [
+          -120,
+          -15
+        ],
+        "threeBet": [
+          1,
+          4
+        ],
+        "foldTo3bet": [
+          20,
+          45
+        ],
+        "foldToSteal": [
+          20,
+          45
         ]
       },
       "maniac": {
@@ -150,80 +274,151 @@
         "premiumFold": [
           0,
           2
+        ],
+        "foldToCbet": [
+          25,
+          45
+        ],
+        "wsd": [
+          40,
+          50
+        ],
+        "bb100": [
+          -150,
+          -20
+        ],
+        "threeBet": [
+          10,
+          20
+        ],
+        "foldTo3bet": [
+          20,
+          45
+        ],
+        "foldToSteal": [
+          20,
+          50
         ]
       }
     }
   },
   "fitted": {
     "regulars": {
-      "vpip": 23.52916666666667,
-      "pfr": 16.879166666666666,
-      "af": 2.511588835523277,
-      "wtsd": 25.775822229348424,
-      "endsPreflop": 62.824999999999996,
-      "threeBet": 7.200471280785091,
-      "foldTo3bet": 44.48729000992042,
-      "foldToSteal": 70.52077201221212,
-      "premiumFold": 0.3968253968253968
+      "vpip": 22.34375,
+      "pfr": 15.583333333333334,
+      "af": 2.4243128186272567,
+      "wtsd": 23.354694738870617,
+      "endsPreflop": 61.3,
+      "threeBet": 5.770386297051324,
+      "foldTo3bet": 57.82024856172628,
+      "foldTo4bet": 55,
+      "foldToSteal": 58.83473213967715,
+      "premiumFold": 0,
+      "cbet": 52.596810189538594,
+      "foldToCbet": 39.47791964629061,
+      "foldToTurnCbet": 47.18506355287965,
+      "wsd": 51.74752735226846,
+      "foldToRaise": 33.33572866210449,
+      "limp": 1.484688532456116
     },
     "field": {
       "nit": {
         "n": 1,
-        "vpip": 16.6,
-        "pfr": 12.35,
-        "af": 2.3404825737265416,
-        "wtsd": 27.69070010449321,
-        "threeBet": 2.9356652092442226,
-        "foldTo3bet": 81.25,
-        "foldToSteal": 91.42857142857143,
-        "premiumFold": 1.9801980198019802
+        "vpip": 15.387500000000001,
+        "pfr": 9.3,
+        "af": 2.1818181818181817,
+        "wtsd": 20.724637681159418,
+        "threeBet": 4.248623131392605,
+        "foldTo3bet": 84.16666666666667,
+        "foldTo4bet": 83.33333333333334,
+        "foldToSteal": 86.9851729818781,
+        "premiumFold": 1.8018018018018018,
+        "cbet": 27.30627306273063,
+        "foldToCbet": 46,
+        "foldToTurnCbet": 0,
+        "wsd": 51.048951048951054,
+        "foldToRaise": 25,
+        "limp": 7.683679192372406,
+        "bb100": 2.59375
       },
       "tag": {
         "n": 2,
-        "vpip": 27.04375,
-        "pfr": 18.98125,
-        "af": 2.7356628348255407,
-        "wtsd": 33.94519477543221,
-        "threeBet": 4.809127094228549,
-        "foldTo3bet": 22.279102384291726,
-        "foldToSteal": 68.50607609660534,
-        "premiumFold": 0
+        "vpip": 23.59375,
+        "pfr": 18.112499999999997,
+        "af": 2.49917239623122,
+        "wtsd": 22.139152305595623,
+        "threeBet": 8.438974980159559,
+        "foldTo3bet": 53.7096609996946,
+        "foldTo4bet": 69.54022988505747,
+        "foldToSteal": 61.80754844946527,
+        "premiumFold": 1.0526315789473684,
+        "cbet": 35.547589709122136,
+        "foldToCbet": 50.346194815954554,
+        "foldToTurnCbet": 67.29166666666667,
+        "wsd": 57.121282527881036,
+        "foldToRaise": 30.40454633018686,
+        "limp": 1.1723974772092185,
+        "bb100": 39.009375
       },
       "lag": {
         "n": 1,
-        "vpip": 35.099999999999994,
-        "pfr": 12.725,
-        "af": 2.963582677165354,
-        "wtsd": 40.19193857965451,
-        "threeBet": 5.761689291101056,
-        "foldTo3bet": 12.121212121212121,
-        "foldToSteal": 32.743362831858406,
-        "premiumFold": 1.0204081632653061
+        "vpip": 26.025,
+        "pfr": 16.8625,
+        "af": 3.253229974160207,
+        "wtsd": 21.95402298850575,
+        "threeBet": 13.477321814254859,
+        "foldTo3bet": 37.42690058479532,
+        "foldTo4bet": 42.30769230769231,
+        "foldToSteal": 51.515151515151516,
+        "premiumFold": 0,
+        "cbet": 48.57916102841678,
+        "foldToCbet": 38.01169590643275,
+        "foldToTurnCbet": 15.384615384615385,
+        "wsd": 50.26178010471204,
+        "foldToRaise": 26.89393939393939,
+        "limp": 4.9797868430724,
+        "bb100": 62.05625
       },
       "station": {
         "n": 1,
-        "vpip": 54.83749999999999,
-        "pfr": 5.9375,
-        "af": 0.7069977426636569,
-        "wtsd": 43.93373775081662,
-        "threeBet": 0.7303077725612936,
-        "foldTo3bet": 3,
-        "foldToSteal": 4.40251572327044,
-        "premiumFold": 0
+        "vpip": 38.8125,
+        "pfr": 5.3875,
+        "af": 0.8086876155268022,
+        "wtsd": 22.137931034482758,
+        "threeBet": 1.3649425287356323,
+        "foldTo3bet": 13.953488372093023,
+        "foldTo4bet": 0,
+        "foldToSteal": 13.80952380952381,
+        "premiumFold": 1.0309278350515463,
+        "cbet": 26.153846153846157,
+        "foldToCbet": 37.58480325644505,
+        "foldToTurnCbet": 37.27272727272727,
+        "wsd": 49.532710280373834,
+        "foldToRaise": 31.03448275862069,
+        "limp": 17.79430437148558,
+        "bb100": -82.36250000000001
       },
       "maniac": {
         "n": 1,
-        "vpip": 61,
-        "pfr": 32.3625,
-        "af": 1.741393442622951,
-        "wtsd": 39.68215158924205,
-        "threeBet": 9.381755296152184,
-        "foldTo3bet": 1.4084507042253522,
-        "foldToSteal": 0,
-        "premiumFold": 0
+        "vpip": 42.525,
+        "pfr": 27.425,
+        "af": 3.0573122529644268,
+        "wtsd": 18.64679822795006,
+        "threeBet": 21.105527638190953,
+        "foldTo3bet": 7.755102040816326,
+        "foldTo4bet": 3.571428571428571,
+        "foldToSteal": 8.673469387755102,
+        "premiumFold": 0,
+        "cbet": 46.10917537746806,
+        "foldToCbet": 39.77272727272727,
+        "foldToTurnCbet": 22.22222222222222,
+        "wsd": 41.90064794816415,
+        "foldToRaise": 30.573248407643312,
+        "limp": 3.8222967309304274,
+        "bb100": -60.30624999999999
       }
     }
   },
   "hands": 8000,
-  "generated": "2026-09-30T03:39:02.249Z"
+  "generated": "2026-09-30T05:51:17.652Z"
 }

@@ -10,6 +10,134 @@ could not be right.
 
 ---
 
+## Unreleased: the money after the flop, and rules instead of charts
+
+The last entry ended with the field paying off: the solved charts valued aces
+under the gun at +40 bb a hand and said to limp them, and the fish lost
+200-290 bb/100. This one went after the money, and found most of it in two
+places nobody had measured.
+
+### Every hand on every flop was a draw
+
+A diagnostic counting what happens after the flop found regulars folding
+22-26% of flop bets against a real ~45%, the station and maniac 11%, a third
+of the mixed table's hands ending in a pot of 100bb or more, and the TAG
+winning **+50 bb every time it was dealt aces**. The station lost 50bb or more
+in 13% of its hands, often holding no pair at all.
+
+The cause was the outs count. `countOuts` counted any card that raised the
+hand's category, and a card that pairs the board raises everybody's: on a
+random flop a hand with no pair averaged **16.6 outs**, which the rule of four
+reads as 66% equity, and that beat its real strength (0.30) every single time.
+Nobody ever folded two unpaired cards on a flop, and no read of the bettor
+could reach them, because the draw term was not priced against anyone. Outs
+are now what a player counts: a card has to gain on the board, and going from
+nothing to a pair counts only for an overcard. The nut flush draw with two
+overcards is 15, two undercards 0, top pair 5, a set 7, and a no-pair hand
+averages 3.1. `node texas.js --test` checks eight such hands.
+
+### A bet now says something
+
+A bet was a flat 20% discount on equity, the same on every street and at every
+raise, so top pair treated a flop bet, a turn bet, a raise and a shove alike.
+Players now read a line the way they read a preflop raise: each bet narrows
+the bettor to the top `postRange` of holdings on this board, a raise over a
+bet counts `postRaiseWeight` bets, a call `postCallWeight`, and a hand's
+equity is the share of that range it beats -- (0.85 - 0.45) / 0.55 = 73% for a
+hand that beats 85% of holdings against one bet. Weak players believe it less,
+as before the flop.
+
+And the preflop raiser now expects a continuation bet to fold out more than
+the price alone says (`initiative`), because the caller misses most flops.
+Without it the fitted regulars c-bet 38% of flops against a real 60-70, and
+the only lever the search had -- more fold equity for every bet -- made
+everybody raise more and fold less.
+
+### What the fit could not see
+
+The calibration gained the statistics that show money moving: c-bet, fold to
+a c-bet and to a turn c-bet, fold when a bet is raised, W$SD, open-limp and
+fold to a 4-bet for the regulars; fold to a c-bet and W$SD for every type, in
+bands that give each its shape; and a loose win-rate band for the two fish.
+Each refit then showed the next thing nothing measured:
+
+- **Refit 1** found regulars folding a raised bet a quarter of the time (a
+  raise had drifted to reading as barely more than a bet) and hitting PFR by
+  open-limping 9% of hands. Fold-to-raise and limp bands went in.
+- **Refit 2** put the regulars on 13 of 15 targets, but pooled over everyone
+  dealt them, aces still won **26.9 bb a hand** at the realistic table. The
+  station's stickiness was a flat bonus in pots, and a pot counts the bet
+  being faced, so for the fitted station the bonus was larger than the price
+  of calling a pot-sized bet: it called river bets holding nothing. After the
+  flop stickiness is now a discount on the price of a call -- weak made hands
+  call, air does not profit.
+- The rule solver, run on refit 2, found that the fitted TAG and nit folded to
+  a 3-bet 78-80% of the time against a real 50-60: only the neutral regulars
+  had carried that band. Its best rules limped most hands and re-raised
+  whoever raised, for +100 to +270 bb/100 over the plain TAG. Every type now
+  carries 3-bet, fold-to-3-bet and fold-to-steal bands.
+
+Two things in the search were wrong along the way. Its steps are multiples of
+the current value, so a parameter at zero could never move: `handOvervalue`
+sat at 0.000 through every fit since it was added, and the entry that says the
+fit "declined" it was reading a search that never tried. Zero now steps by a
+fraction of the parameter's range. And once each type carried a dozen bands,
+VPIP was one term in thirteen, and the fit let the maniac play 42% of hands
+against 62 to buy fractions of a point inside bands. A type's four defining
+statistics and its bands are now weighted half and half.
+
+### Where it landed
+
+The kept fit is the third. Measured on deals the search never saw, the
+regulars sit at 22.3/15.6 with AF 2.4, fold to a c-bet 41.6%, to a turn c-bet
+45.7%, W$SD 51.2, fold to a 3-bet 56 and to a 4-bet 66, and open-limp 1.5% of
+hands; c-bets run a few points short (50.5) and they fold a raised bet 28% of
+the time against a band of 35-60. The TAG type is 23.8/18.0 and folds to a
+3-bet 52.5% of the time. At the realistic table the money flows from the fish
+to the regulars at realistic rates: TAGs +50.1 and +32.9, LAG +28.5, nit +2.9,
+maniac **−56.8**, station **−57.7** -- against 200-290 lost before. After the
+flop 6.9% of the mixed table's hands end in a 100bb pot, against a third.
+Aces still win **15.6 bb a hand**, a few times the real figure; the new check
+in `texas-results.js` fails on it and says so.
+
+The price is the fish. They lose like fish but fold after the flop like
+regulars -- the station shows down 20% of its flops against a target of 42 --
+and the maniac plays 42% of hands against 62. The fourth, resumed fit, with
+the core statistics weighted up and the station and maniac started stickier
+and looser, made them call down like fish, and they immediately lost 124-143
+bb/100 with the TAG type winning 138: in this model a fish that calls down
+aims its calls badly enough to lose several times what a real one does. The
+third fit keeps the money honest and was kept; how to reproduce the fourth is
+in the README's Limitations.
+
+### Rules instead of charts
+
+`texas-strategy.js` now solves the rule a player carries rather than a
+169-hand chart: "raise the top X% from this seat, call the next Y%, fold the
+rest", per seat and situation, on 21 bands of the hand ranking (a point wide
+at the top, fifteen at the bottom). Each band pools about eight hands'
+deals, and every pass the hero plays the best rule of that shape, so the rule
+is what is solved rather than something read off a noisy chart afterwards.
+Each cutoff is printed with the stretch of the ranking where the actions
+either side of it are within two standard errors, and each rule with its cost
+against playing every band its own best action -- including how much of that
+cost is clear at 2 SE, because the best of several noisy estimates always
+looks better than it is. The old chart is `--chart`; `--agree --cross` replays
+every field's rules in every other field.
+
+Solved against the kept field, the rules are not advice. They limp a third to
+two thirds of hands, re-raise a quarter to half of them when raised, and beat
+the plain TAG by **+77** (tough field), **+127** (realistic) and **+158**
+(soft) bb/100, and each field's rules win +46 to +175 in the others. A
+decomposition of the tough-field edge by preflop line put two thirds of it on
+one line: limp, then re-raise whoever isolates, with a hand the TAG would have
+folded -- +3.5 bb every time. The isolator folds 59% of the time, inside the
+published fold-to-3-bet band, and when it calls, the junk loses only a big
+blind after the flop. A real table adapts to that inside an orbit; this one
+never adapts, and a best response to a static field finds it. The two earlier
+exploits it found were holes in the fit and were closed; this one is a limit
+of solving against a field that does not learn.
+
 ## Unreleased: a strategy solver, and the preflop model it broke
 
 ### A solver that found the field's leak in one run
@@ -167,7 +295,11 @@ does what it claims: at 0.5, a station-like player's folds fall **9.3% ->
 5.1%** and its raises *rise* **8.3% -> 14.6%** on a made hand, while an
 ace-high view is bit-identical.
 
-The search tried it through every stage-3 pass and kept it at **0.000**. It
+The search tried it through every stage-3 pass and kept it at **0.000**.
+*(Correction, later: it did not. The search steps are multiples of the current
+value, and zero times any multiple is zero -- the parameter was never moved,
+so nothing below says the fit preferred anything to it. See "Unreleased: the
+money after the flop".)* It
 had found a blunter instrument it liked better: raise the station's own
 aggression (0.10 -> 0.33) and skill (0.49 -> 0.63). The refit took the
 objective from 0.0108 to **0.00519** and the station to **49.5/45** with
