@@ -215,10 +215,92 @@ const boardStrength = (hole, board) => {
   return strength
 }
 
+// Opponents may be fractional -- an expected count, before the flop -- and are
+// interpolated between the whole numbers either side.
 const preflopEquity = (idx, opponents) => {
   const t = load()
   const n = Math.max(1, Math.min(8, opponents))
-  return t.preflop[n - 1][idx]
+  const lo = Math.floor(n)
+  const f = n - lo
+  if (f < 1e-9 || lo >= 8) return t.preflop[lo - 1][idx]
+  return t.preflop[lo - 1][idx] * (1 - f) + t.preflop[lo][idx] * f
+}
+
+// ------------------------------------------------------ against a range
+//
+// "He raised, so he has a good hand" is the single most important read in
+// preflop poker, and every player makes it: nobody prices a call against a
+// raise as if the raiser held a random hand. The read has a size, too -- an
+// open is a fifth of all hands, a 3-bet a few percent, an all-in shove over a
+// 3-bet barely more than the big pairs.
+//
+// So the table holds each starting hand's heads-up equity against the top X%
+// of hands, for a grid of X. "Top" is ranked by equity against three random
+// hands, the ordering range charts are conventionally written in, and a range
+// is built from whole starting hands, best first, until it covers X% of the
+// 1326 combinations.
+//
+// The model this replaces priced a call off equity against random hands and
+// then shaded it by the price, with the shade a fitted constant. The fit ran
+// that constant to 3.5, where the shaded equity is negative for any real raise:
+// no fitted player would ever call a preflop raise, holding aces or not, and
+// facing an all-in they folded everything. Behavioural statistics could not
+// see it, because the frequencies came out right.
+const RANGE_GRID = [1.5, 2.5, 4, 6, 9, 13, 18, 25, 35, 50, 70, 100]
+
+// Starting hands, strongest first, by equity against three random hands.
+const rangeOrder = (preflop) => [...Array(169).keys()]
+  .sort((x, y) => preflop[2][y] - preflop[2][x])
+
+// Where a starting hand sits in the ranking, as a percentage: 0.5 is the very
+// top, 99 the very bottom. Measured at the middle of the hand's own combos, so
+// "open the top 20%" means exactly the hands whose rank is below 20.
+//
+// `skill` blends the true ranking with the naive one, which orders hands by
+// heads-up equity against a random hand. That ranking is the one weak players
+// carry: it rates A2o and K5o above 76s and 55, because they win more often
+// heads up, and misses that the suited connector plays better in a real pot.
+// The same shape of error as postflop, where a weak player reads a made hand
+// by its unconditional strength.
+let ranks = null
+const handRank = (idx, skill = 1) => {
+  if (!ranks) {
+    const t = load()
+    const place = (order) => {
+      const out = new Array(169)
+      let cum = 0
+      for (const h of order) {
+        const a = Math.floor(h / 13)
+        const b = h % 13
+        const share = (a === b ? 6 : a > b ? 4 : 12) / 1326 * 100
+        out[h] = cum + share / 2
+        cum += share
+      }
+      return out
+    }
+    ranks = {
+      true: place(rangeOrder(t.preflop)),
+      naive: place([...Array(169).keys()].sort((x, y) => t.preflop[0][y] - t.preflop[0][x]))
+    }
+  }
+  return ranks.true[idx] + (1 - skill) * (ranks.naive[idx] - ranks.true[idx])
+}
+
+// Equity against the top `pct` percent, interpolated on the grid in log space
+// because the interesting ranges are all at the narrow end.
+const rangeEquity = (idx, pct) => {
+  const t = load()
+  if (!t.vsRange) {
+    throw new Error('equity.json has no range table -- run: node texas-equity.js --build-ranges')
+  }
+  const p = Math.max(RANGE_GRID[0], Math.min(100, pct))
+  let i = 0
+  while (i < RANGE_GRID.length - 2 && RANGE_GRID[i + 1] < p) i++
+  const lo = RANGE_GRID[i]
+  const hi = RANGE_GRID[i + 1]
+  const f = (Math.log(p) - Math.log(lo)) / (Math.log(hi) - Math.log(lo))
+  const row = t.vsRange[idx]
+  return row[i] + Math.max(0, Math.min(1, f)) * (row[i + 1] - row[i])
 }
 
 // ------------------------------------------------------- the estimate
@@ -238,13 +320,24 @@ const preflopEquity = (idx, opponents) => {
 // Nothing here is random per call: the same player estimating the same spot
 // gets the same answer. The variability in what they *do* belongs to the
 // decision rule, not to the estimate.
-const estimateEquity = (hole, board, opponents, skill = 1) => {
+//
+// `range`, preflop only, is how wide the player reads the last raiser's range,
+// as a percentage of hands -- null when nobody has raised. See rangeEquity.
+const estimateEquity = (hole, board, opponents, skill = 1, range = null) => {
   if (board.length === 0) {
-    const exact = preflopEquity(handIndex(hole[0], hole[1]), opponents)
-    // A weak player preflop mostly misprices multiway pots, pricing the hand
-    // closer to its heads-up value than its real one.
-    const headsUp = preflopEquity(handIndex(hole[0], hole[1]), 1)
-    return exact + (1 - skill) * (headsUp - exact)
+    const idx = handIndex(hole[0], hole[1])
+    const exact = preflopEquity(idx, opponents)
+    const headsUp = preflopEquity(idx, 1)
+    // Facing a raise, the skilled read is equity against the raiser's range,
+    // discounted for the rest of the field by the same factor extra random
+    // hands would cost.
+    const read = range !== null && range < 100
+      ? rangeEquity(idx, range) * exact / headsUp
+      : exact
+    // A weak player prices the hand at its heads-up value against a random
+    // hand: blind both to how many are in the pot and to what a raise means.
+    // That is the calling station's preflop leak, stated as a read.
+    return read + (1 - skill) * (headsUp - read)
   }
 
   // The two readings of the same hand, and the difference between them is a
@@ -286,7 +379,8 @@ const estimateEquity = (hole, board, opponents, skill = 1) => {
 
 module.exports = {
   handIndex, handLabel, handCards, countOuts,
-  strengthPercentile, boardStrength, preflopEquity, estimateEquity, TABLE_FILE
+  strengthPercentile, boardStrength, preflopEquity, rangeEquity, rangeOrder, RANGE_GRID, handRank,
+  estimateEquity, TABLE_FILE
 }
 
 // ------------------------------------------------------------- building
@@ -375,8 +469,98 @@ const buildPreflop = (samples) => {
   return out
 }
 
+// Heads-up equity of every starting hand against the top X% of hands, for each
+// X on the grid. The opponent's holding is drawn uniformly from the range's
+// combinations -- which is what weights a pair (6 combos) against an offsuit
+// hand (12) correctly -- redrawing any that collide with the hero's cards.
+const buildRanges = (preflop, samples) => {
+  const order = rangeOrder(preflop)
+  const combosOf = (idx) => {
+    const a = Math.floor(idx / 13)
+    const b = idx % 13
+    const out = []
+    for (let s1 = 0; s1 < 4; s1++) {
+      for (let s2 = 0; s2 < 4; s2++) {
+        if (a === b && s2 <= s1) continue
+        if (a > b && s1 !== s2) continue
+        if (a < b && s1 === s2) continue
+        const hi = a > b ? a : b
+        const lo = a > b ? b : a
+        out.push([hi * 4 + s1, lo * 4 + s2])
+      }
+    }
+    return out
+  }
+  const ranges = RANGE_GRID.map((pct) => {
+    const want = 1326 * pct / 100
+    const combos = []
+    for (const idx of order) {
+      if (combos.length >= want) break
+      combos.push(...combosOf(idx))
+    }
+    return combos
+  })
+
+  let seed = 20260929
+  const rand = () => {
+    seed = (seed + 0x6d2b79f5) >>> 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+
+  const out = []
+  const used = new Uint8Array(52)
+  const board = new Array(5)
+  for (let idx = 0; idx < 169; idx++) {
+    const mine = handCards(idx)
+    const row = []
+    for (const range of ranges) {
+      let won = 0
+      for (let s = 0; s < samples; s++) {
+        let theirs
+        do {
+          theirs = range[Math.floor(rand() * range.length)]
+        } while (theirs[0] === mine[0] || theirs[0] === mine[1] ||
+          theirs[1] === mine[0] || theirs[1] === mine[1])
+        used.fill(0)
+        used[mine[0]] = used[mine[1]] = used[theirs[0]] = used[theirs[1]] = 1
+        for (let k = 0; k < 5; k++) {
+          let c
+          do c = Math.floor(rand() * 52); while (used[c])
+          used[c] = 1
+          board[k] = c
+        }
+        const a = evaluate([mine[0], mine[1], ...board])
+        const b = evaluate([theirs[0], theirs[1], ...board])
+        won += a > b ? 1 : a === b ? 0.5 : 0
+      }
+      row.push(Math.round((won / samples) * 1e4) / 1e4)
+    }
+    out.push(row)
+  }
+  return out
+}
+
 if (require.main === module) {
-  if (process.argv[2] === '--build') {
+  if (process.argv[2] === '--build-ranges') {
+    const samples = Number(process.argv[3]) || 20000
+    const t = load()
+    const started = Date.now()
+    console.log('Building the range table (' + samples.toLocaleString() +
+      ' samples per cell, ' + RANGE_GRID.length + ' ranges)')
+    t.vsRange = buildRanges(t.preflop, samples)
+    t.rangeGrid = RANGE_GRID
+    t.rangeSamples = samples
+    fs.writeFileSync(TABLE_FILE, JSON.stringify(t))
+    console.log('Wrote equity.json in ' + ((Date.now() - started) / 1000).toFixed(0) + 's')
+    const label = (l) => [...Array(169).keys()].find((i) => handLabel(i) === l)
+    console.log('\n  vs top %   ' + RANGE_GRID.map((p) => String(p).padStart(6)).join(''))
+    for (const l of ['AA', 'KK', 'QQ', 'AKs', 'AKo', 'JJ', '99', 'AJo', 'KQs', '76s', '72o']) {
+      console.log('  ' + l.padEnd(10) + t.vsRange[label(l)]
+        .map((x) => (x * 100).toFixed(1).padStart(6)).join(''))
+    }
+  } else if (process.argv[2] === '--build') {
     const samples = Number(process.argv[3]) || 40000
     console.log('Building equity.json (' + samples.toLocaleString() +
       ' samples per preflop cell)')

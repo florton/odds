@@ -29,7 +29,7 @@
 // afterwards by the tracker at the bottom of this file. Asserting it directly
 // would beg the question the simulation is supposed to answer.
 
-const { estimateEquity } = require('./texas-equity')
+const { estimateEquity, handIndex, handRank } = require('./texas-equity')
 const { evaluate, categoryOf } = require('./texas-eval')
 
 // ------------------------------------------------------------------ traits
@@ -82,19 +82,48 @@ const PARAMS = {
   foldSlope: 0.55,
   stubbornness: 0.45,
 
-  // How far to discount equity for the news that somebody else is betting.
+  // How wide a player reads the last raiser's range before the flop, as a
+  // percentage of all hands: an open is `rangeOpen`, each further raise
+  // narrows it by `rangeStep`, and a raise bigger than the standard 3x
+  // narrows it again by (3 / size)^rangeSizeExp -- a shove over an open is not
+  // a 3-bet range, it is the big pairs. Equity is then read against that range
+  // (texas-equity.js, rangeEquity), which is how a player prices a call.
   //
-  // Split by street, because the news is not the same news. A preflop raise is
-  // a narrow, honest range -- almost nobody opens trash from early position --
-  // so it should be believed. A postflop bet is a much weaker signal, since
+  // This replaced `callShadePre`, a discount of preflop equity proportional to
+  // the price. The fit ran it to 3.5, where the discounted equity is negative
+  // for every real raise: nobody would call a raise with aces, and against a
+  // shove everybody folded everything. VPIP and PFR came out right regardless,
+  // which is how it survived -- they count how often a player acts, not with
+  // what. A range read cannot go negative however it is fitted, and it says
+  // what the old constant was trying to: a raise is a strong hand.
+  rangeOpen: 20,
+  rangeStep: 0.3,
+  rangeSizeExp: 0.5,
+
+  // Facing a preflop raise, how many of the players still to act a player
+  // expects to come along: a call is priced against everyone already in plus
+  // this fraction of those behind, since most of them will fold.
+  enterRate: 0.3,
+  // And how likely each of them is to raise again -- a squeeze -- which
+  // usually costs the call.
+  raiseBehind: 0.12,
+
+  // The preflop chart (see preflopValues). Open the top `openBase`% with two
+  // players left behind (the button), times `openDecay` for each further one
+  // and `limpedMult` for each limper; a raise is worth `chartScale` pots per
+  // unit of log-margin inside that width, a limp `limpGap` less. Facing a raise,
+  // 3-bet when equity against the raiser's range clears `threeBetEq`.
+  openBase: 45,
+  openDecay: 0.75,
+  limpedMult: 0.9,
+  limpGap: 0.08,
+  chartScale: 3,
+  threeBetEq: 0.58,
+
+  // How far to discount postflop equity for the news that somebody is betting.
+  // A postflop bet is a much weaker signal than a preflop raise, since
   // continuation bets are made with most of a range whether they connected or
-  // not, so it should be believed far less.
-  //
-  // As a single constant this could not do both jobs: the fit drove it to its
-  // bound trying to make preflop tight enough, and that same shade then folded
-  // every flop, which is why showdowns were reached on 15.8% of hands against
-  // a real 26%. One constant, two incompatible demands.
-  callShadePre: 0.55,
+  // not, so it is believed far less.
   callShadePost: 0.20,
   raiseShade: 0.45,
 
@@ -126,8 +155,9 @@ const PARAMS = {
   // to pay for.
   futureCost: 0.35,
 
-  // Proficiency to softmax temperature.
+  // Proficiency to softmax temperature, after the flop and before it.
   temperature: 1.2,
+  temperaturePre: 0.6,
   temperatureCurve: 1.0,
 
   // How much position is worth. Chips out of position are worth less than the
@@ -147,7 +177,12 @@ const PARAMS = {
   maxBias: 0.60
 }
 
-const setParams = (p) => Object.assign(PARAMS, p)
+// Only keys the model still has: a calibration.json written before a constant
+// was retired would otherwise carry it back in, unused but reported as fitted.
+const setParams = (p) => {
+  for (const k of Object.keys(p)) if (k in PARAMS) PARAMS[k] = p[k]
+  return PARAMS
+}
 
 // --------------------------------------------------------- action values
 //
@@ -159,6 +194,10 @@ const setParams = (p) => Object.assign(PARAMS, p)
 // This is the same move odds.js makes for blackjack: the decision has to be
 // made on the EV scale because the payouts differ per action, and comparing
 // anything else silently compares the wrong quantities.
+//
+// After the flop only. Before it, see preflopValues: a one-shot valuation like
+// this one cannot price a preflop hand, whose value is mostly in the streets
+// it has not seen yet.
 const actionValues = (v, equity, opponents, sizing = 0.6) => {
   const pot = v.pot
   const toCall = v.toCall
@@ -180,17 +219,13 @@ const actionValues = (v, equity, opponents, sizing = 0.6) => {
   // nearer 60% -- and a big blind that realises 86% is right never to fold for
   // one more chip into six, which is why hands almost never ended preflop.
   //
-  // It applies in full before the flop and at a fitted fraction after it,
-  // because realisation is a *forecast*: it prices the streets still to come.
-  // Once those streets arrive the disadvantage is already being paid, in the
-  // action order itself, and charging the forecast again on every street counts
-  // it twice -- which folded so many flops that showdowns fell to 6% of hands.
-  const stepsToButton = (v.button - v.seat + v.numPlayers) % v.numPlayers
-  const outOfPosition = v.numPlayers > 1 ? stepsToButton / (v.numPlayers - 1) : 0
-  const positionPull = v.board.length === 0
-    ? PARAMS.pullPosition
-    : PARAMS.pullPosition * PARAMS.positionPostWeight
-  const realisation = 1 - positionPull * outOfPosition
+  // It applies in full before the flop (in preflopValues) and at a fitted
+  // fraction after it, because realisation is a *forecast*: it prices the
+  // streets still to come. Once those streets arrive the disadvantage is
+  // already being paid, in the action order itself, and charging the forecast
+  // again on every street counts it twice -- which folded so many flops that
+  // showdowns fell to 6% of hands.
+  const realisation = 1 - PARAMS.pullPosition * PARAMS.positionPostWeight * outOfPositionOf(v)
   equity = Math.max(0, Math.min(1, equity * realisation))
 
   // Folding forfeits nothing further. It is the origin of the scale.
@@ -202,29 +237,23 @@ const actionValues = (v, equity, opponents, sizing = 0.6) => {
   } else {
     // Being bet into is bad news. Equity here is measured against random
     // hands, but the player putting chips in does not hold a random hand, and
-    // the bigger the bet the less random it is. Pricing a call off
-    // unconditional equity is the single thing that makes a heuristic bot call
-    // far too much, so the estimate is shaded by the price being laid.
+    // the bigger the bet the less random it is, so the estimate is shaded by
+    // the price being laid.
     const price = toCall / (pot + toCall)
-    const shadeAmount = v.board.length === 0
-      ? PARAMS.callShadePre * price
-      : Math.min(0.95, PARAMS.callShadePostBase + PARAMS.callShadePost * price)
+    const shadeAmount = Math.min(0.95, PARAMS.callShadePostBase + PARAMS.callShadePost * price)
     const facing = equity * (1 - shadeAmount)
     // Streets still to be paid for: two on the flop, one on the turn, none on
-    // the river. Preflop is priced by its own shade rather than this.
-    const toCome = v.board.length === 0 ? 0 : Math.max(0, 4 - v.board.length)
+    // the river.
+    const toCome = Math.max(0, 4 - v.board.length)
     const effectiveCost = toCall * (1 + PARAMS.futureCost * toCome)
     values.call = facing * pot - (1 - facing) * effectiveCost
   }
 
   if (v.canRaise) {
-    // Preflop is priced in blinds and postflop as a fraction of the pot,
-    // which is how raises are actually sized at a table. A `sizing` of 0.6
-    // opens for about 3.2bb and bets about 60% of the pot -- both squarely in
-    // the normal range, with the trait moving them either way.
-    const target = v.board.length === 0
-      ? v.committed[v.seat] + toCall + v.bigBlind * (1 + 2 * sizing)
-      : v.committed[v.seat] + toCall + pot * sizing
+    // Bets are sized as a fraction of the pot, which is how they are actually
+    // sized at a table. A `sizing` of 0.6 bets about 60% of the pot, with the
+    // trait moving it either way; preflop sizing is preflopRaiseTo.
+    const target = v.committed[v.seat] + toCall + pot * sizing
     const raiseTo = Math.max(v.minRaiseTo, Math.min(v.maxRaiseTo, Math.round(target)))
     const cost = raiseTo - v.committed[v.seat]
     const price = cost / (pot + cost)
@@ -322,7 +351,12 @@ const applyTraits = (values, traits, equity, pot, tiltLevel, preflop) => {
     // The per-archetype scale extends the reach of that immovability: the
     // trait itself saturates at 0.98, so past it only the scale has any
     // gradient to give.
-    if (preflop) out.call += pot * (looseness - 0.5) * PARAMS.pullLooseness * 2
+    //
+    // Before the flop the bias fades as the hand gets stronger, by (1 -
+    // equity): looseness is about which marginal hands a player takes on,
+    // and nobody's personality decides whether to play aces. As a flat bias
+    // it let a tight enough nit fold AA to a raise.
+    if (preflop) out.call += pot * (looseness - 0.5) * PARAMS.pullLooseness * 2 * (1 - equity)
     else out.call += pot * (traits.stickiness - 0.5) * PARAMS.pullStickiness * 2 *
       (traits.stickinessScale || 1)
   }
@@ -357,9 +391,14 @@ const applyTraits = (values, traits, equity, pot, tiltLevel, preflop) => {
 // traits are baked into the values *before* the temperature is applied, so an
 // unskilled aggressive player is erratic in an aggressive direction. That is
 // the whole reason the two dials are separate.
-const choose = (values, proficiency, pot, rng) => {
+//
+// `base` is the temperature at the regulars' proficiency. Preflop has its own
+// (temperaturePre): a memorised chart is played far more steadily than a
+// postflop judgement is made, and one shared temperature could not be low
+// enough for the first without freezing the second.
+const choose = (values, proficiency, pot, rng, base = PARAMS.temperature) => {
   const keys = Object.keys(values).filter((k) => k !== 'raiseTo')
-  const temperature = pot * PARAMS.temperature * REG_SLOPPINESS *
+  const temperature = pot * base * REG_SLOPPINESS *
     Math.pow((1.02 - proficiency) / REG_SLOPPINESS, PARAMS.temperatureCurve)
 
   if (temperature < 1e-9) {
@@ -400,6 +439,150 @@ const countOpponents = (v) => {
   return Math.max(1, n)
 }
 
+// Preflop, who is already in voluntarily and who is still to act (posting a
+// blind is not acting).
+const splitOpponents = (v) => {
+  const acted = new Set()
+  for (const a of v.history) {
+    if (a.street === 'preflop' && a.type !== 'fold') acted.add(a.seat)
+  }
+  let inAlready = 0
+  let pending = 0
+  for (let s = 0; s < v.numPlayers; s++) {
+    if (s === v.seat || !v.inHand[s] || v.folded[s]) continue
+    if (acted.has(s)) inAlready++
+    else pending++
+  }
+  return { inAlready, pending }
+}
+
+// The read on the last preflop raiser: what percentage of hands they would do
+// this with, or null if nobody has raised. Everything it uses is on the table
+// -- how many raises, and how big the last one was relative to the bet it
+// raised.
+const raiserRange = (v) => {
+  let raises = 0
+  let bet = v.bigBlind
+  let size = 3
+  for (const a of v.history) {
+    if (a.street !== 'preflop' || a.type !== 'raise') continue
+    size = a.to / bet
+    bet = a.to
+    raises++
+  }
+  if (raises === 0) return null
+  const pct = PARAMS.rangeOpen * Math.pow(PARAMS.rangeStep, raises - 1) *
+    Math.pow(Math.min(1, 3 / size), PARAMS.rangeSizeExp)
+  return Math.max(1, Math.min(100, pct))
+}
+
+// ---------------------------------------------------------- before the flop
+//
+// Nobody works out the expected value of a preflop open. They know roughly how
+// good their hand is -- where it sits among the 169 -- and roughly how wide
+// they open from this seat, and they compare the two. Facing a raise they do
+// work something out, but it is the pot-odds sum against the raiser's range,
+// not a simulation of the rest of the hand.
+//
+// That is how the model plays before the flop too, and it replaced a one-shot
+// valuation (equity times pot, as if every hand went quietly to showdown) that
+// could not do it. That valuation priced a raise with aces under the gun at
+// under half a big blind -- it cannot see the later streets where aces make
+// their money -- so aces were folded to decision noise, and the only fit that
+// ever made the field look tight got there with a constant that made every
+// preflop call unprofitable, aces included.
+//
+// The values below are in the same currency as everything else -- chips, with
+// fold at zero -- so personality biases and the proficiency temperature act on
+// them exactly as they do after the flop.
+//
+// Unopened (or only limped): open the top W% of hands, where W widens as fewer
+// players are left behind and shifts with each limper. A hand's raise value is
+// how far inside W it sits, times `chartScale` pots. A limp is the same hand
+// valued `limpGap` lower: a regular prefers to raise the hands they play, and
+// only a player whose personality likes calling ends up limping.
+//
+// Facing a raise: the pot-odds sum on equity against the raiser's range, with
+// the cost of position and of being squeezed by players still to act. A 3-bet
+// is valued by how far that equity clears `threeBetEq`.
+// Opens are priced in blinds -- a `sizing` of 0.6 opens for about 3.2bb, plus
+// a blind per limper -- and re-raises as a multiple of the bet they raise,
+// 3.2x at the same sizing, which is how both are sized at a table. Pricing a
+// 3-bet in blinds too made it a near-minimum raise that nobody had a reason
+// to fold to.
+const preflopRaiseTo = (v, sizing) => {
+  const currentBet = v.committed[v.seat] + v.toCall
+  let raised = false
+  let limpers = 0
+  for (const a of v.history) {
+    if (a.street !== 'preflop') continue
+    if (a.type === 'raise') raised = true
+    else if (a.type === 'call' && !raised) limpers++
+  }
+  const target = raised
+    ? currentBet * (2 + 2 * sizing)
+    : v.bigBlind * (2 + 2 * sizing) + limpers * v.bigBlind
+  return Math.max(v.minRaiseTo, Math.min(v.maxRaiseTo, Math.round(target)))
+}
+
+const outOfPositionOf = (v) => {
+  const stepsToButton = (v.button - v.seat + v.numPlayers) % v.numPlayers
+  return v.numPlayers > 1 ? stepsToButton / (v.numPlayers - 1) : 0
+}
+
+const preflopValues = (v, skill, sizing) => {
+  const idx = handIndex(v.holeCards[0], v.holeCards[1])
+  const pot = v.pot
+  const values = { fold: 0 }
+  const range = raiserRange(v)
+  const { inAlready, pending } = splitOpponents(v)
+  let strength
+
+  if (range === null) {
+    const rank = handRank(idx, skill)
+    // The button's width is the widest: the blinds, facing limpers with one
+    // or no players behind them, raise at most that wide. Extrapolating the
+    // decay past the button had the big blind isolating a limp with 72% of
+    // hands, and the first chart solved against it limped the button with
+    // 78% of hands to re-raise those isolations.
+    const behind = Math.max(2, pending)
+    const width = Math.max(0.5, Math.min(100, PARAMS.openBase *
+      Math.pow(PARAMS.openDecay, behind - 2) * Math.pow(PARAMS.limpedMult, inAlready)))
+    // How many times inside the range the hand is, on a log scale. Aces are
+    // about a hundred times inside any opening range and a hand at the edge is
+    // at zero, so decision noise lands where people actually make mistakes --
+    // on the marginal hands. Measured as a plain difference in rank, aces sat
+    // only 19 points inside a nit's range under the gun, no further from the
+    // edge in value than a middling hand, and were folded to noise.
+    const margin = Math.log(width / rank)
+    const scale = PARAMS.chartScale * pot
+    if (v.canRaise) values.raise = scale * margin
+    // The big blind's option costs nothing, so checking is worth a little
+    // more than folding whatever the hand.
+    if (v.toCall === 0) values.check = scale * 0.01
+    else values.call = scale * (margin - PARAMS.limpGap)
+    strength = 1 - rank / 100
+  } else {
+    const opponents = Math.max(1, inAlready + pending * PARAMS.enterRate)
+    const equity = estimateEquity(v.holeCards, [], opponents, skill, range)
+    // Once the money is all in there are no later streets to play out of
+    // position and nothing left to be squeezed off the hand by: the equity is
+    // realised in full. Charging both anyway had the fitted TAG folding aces
+    // to an all-in 15% of the time.
+    const allIn = v.toCall >= v.stack || v.allIn.some((a, s) => a && s !== v.seat && !v.folded[s])
+    const realised = allIn
+      ? equity
+      : equity * (1 - PARAMS.pullPosition * outOfPositionOf(v) * (1 - equity))
+    const squeezed = allIn ? 0 : 1 - Math.pow(1 - PARAMS.raiseBehind, pending)
+    const call = realised * (pot + v.toCall) - v.toCall
+    values.call = (1 - squeezed) * call - squeezed * v.toCall
+    if (v.canRaise) values.raise = PARAMS.chartScale * pot * (equity - PARAMS.threeBetEq)
+    strength = equity
+  }
+  values.raiseTo = preflopRaiseTo(v, sizing)
+  return { values, strength }
+}
+
 const makePlayer = (name, { traits = {}, proficiency = 0.5, rng = Math.random } = {}) => {
   const t = { ...DEFAULT_TRAITS, ...traits }
   const player = {
@@ -409,26 +592,35 @@ const makePlayer = (name, { traits = {}, proficiency = 0.5, rng = Math.random } 
     tiltLevel: 0,
 
     act: (v) => {
-      const opponents = countOpponents(v)
-      // Proficiency first degrades the read on the hand, before it is used
-      // for anything. A weak player is not making good decisions noisily --
-      // they are making decisions on a wrong number.
-      let equity = estimateEquity(v.holeCards, v.board, opponents, proficiency)
-      // Sticky players overvalue made hands -- a station calls down with any
-      // pair and bets it, which is why the bonus lifts both calls and bets
-      // where a raw stickiness bias only lifts calls. Symmetric about
-      // neutral: a non-sticky player undervalues the same hands.
-      if (v.board.length > 0 && PARAMS.handOvervalue !== 0) {
-        const made = categoryOf(evaluate(v.holeCards.concat(v.board))) >= 1
-        if (made) {
-          equity = Math.max(0, Math.min(1,
-            equity + PARAMS.handOvervalue * (t.stickiness - 0.5)))
+      const preflop = v.board.length === 0
+      let base
+      let equity
+      if (preflop) {
+        const pre = preflopValues(v, proficiency, t.sizing)
+        base = pre.values
+        equity = pre.strength
+      } else {
+        const opponents = countOpponents(v)
+        // Proficiency first degrades the read on the hand, before it is used
+        // for anything. A weak player is not making good decisions noisily --
+        // they are making decisions on a wrong number.
+        equity = estimateEquity(v.holeCards, v.board, opponents, proficiency)
+        // Sticky players overvalue made hands -- a station calls down with
+        // any pair and bets it, which is why the bonus lifts both calls and
+        // bets where a raw stickiness bias only lifts calls. Symmetric about
+        // neutral: a non-sticky player undervalues the same hands.
+        if (PARAMS.handOvervalue !== 0) {
+          const made = categoryOf(evaluate(v.holeCards.concat(v.board))) >= 1
+          if (made) {
+            equity = Math.max(0, Math.min(1,
+              equity + PARAMS.handOvervalue * (t.stickiness - 0.5)))
+          }
         }
+        base = actionValues(v, equity, opponents, t.sizing)
       }
-      const base = actionValues(v, equity, opponents, t.sizing)
-      const biased = applyTraits(base, t, equity, v.pot, player.tiltLevel,
-        v.board.length === 0)
-      const pick = choose(biased, proficiency, Math.max(v.bigBlind, v.pot), rng)
+      const biased = applyTraits(base, t, equity, v.pot, player.tiltLevel, preflop)
+      const pick = choose(biased, proficiency, Math.max(v.bigBlind, v.pot), rng,
+        preflop ? PARAMS.temperaturePre : PARAMS.temperature)
 
       if (pick === 'raise') return { action: 'raise', to: base.raiseTo }
       if (pick === 'call') return { action: 'call' }
@@ -524,13 +716,70 @@ const archetype = (kind, proficiency, rng, label) =>
 const makeTracker = (numPlayers) => {
   const blank = () => ({
     hands: 0, vpip: 0, pfr: 0, bets: 0, calls: 0, folds: 0,
-    sawFlop: 0, showdowns: 0, won: 0, chips: 0
+    sawFlop: 0, showdowns: 0, won: 0, chips: 0,
+    threeBetOpp: 0, threeBet: 0, foldTo3betOpp: 0, foldTo3bet: 0,
+    stealOpp: 0, foldToSteal: 0, premiumOpp: 0, premiumFold: 0
   })
   const stats = Array.from({ length: numPlayers }, blank)
+
+  // The preflop response statistics, each counted over its own opportunities
+  // the way a tracker counts them. These exist because VPIP and PFR say how
+  // often a player acts and nothing about with what -- a field that folded
+  // aces to every raise fitted all four of the original statistics. These
+  // four say what happens when somebody raises:
+  //
+  //   3-bet         re-raised a single raise, when they had the chance
+  //   fold to 3-bet opened, got re-raised, folded
+  //   fold to steal in the big blind against a lone open from CO/BTN/SB
+  //   premium fold  folded AA or KK to a bet -- which real players do not do
+  const recordResponses = (result) => {
+    const n = numPlayers
+    const once = new Set()
+    let raises = 0
+    let opener = -1
+    let calledOpen = false
+    let limped = false
+    for (const a of result.actions) {
+      if (a.street !== 'preflop') break
+      const s = a.seat
+      const st = stats[s]
+      if (raises === 1 && s !== opener && !once.has('3b' + s)) {
+        once.add('3b' + s)
+        st.threeBetOpp++
+        if (a.type === 'raise') st.threeBet++
+      }
+      if (raises === 2 && s === opener && !once.has('f3' + s)) {
+        once.add('f3' + s)
+        st.foldTo3betOpp++
+        if (a.type === 'fold') st.foldTo3bet++
+      }
+      const pos = (s - result.button + n) % n
+      const openerPos = (opener - result.button + n) % n
+      if (raises === 1 && !calledOpen && !limped && pos === 2 &&
+        (openerPos === 0 || openerPos === 1 || openerPos === n - 1)) {
+        st.stealOpp++
+        if (a.type === 'fold') st.foldToSteal++
+      }
+      const hole = result.holeCards[s]
+      if (a.toCall > 0 && hole && (hole[0] >> 2) === (hole[1] >> 2) && (hole[0] >> 2) >= 11) {
+        st.premiumOpp++
+        if (a.type === 'fold') st.premiumFold++
+      }
+      if (a.type === 'raise') {
+        raises++
+        if (raises === 1) opener = s
+      } else if (a.type === 'call' && raises === 1) {
+        calledOpen = true
+      } else if (a.type === 'call' && raises === 0) {
+        limped = true
+      }
+    }
+  }
 
   return {
     stats,
     record: (result) => {
+      recordResponses(result)
       const voluntary = new Array(numPlayers).fill(false)
       const raisedPre = new Array(numPlayers).fill(false)
       const foldedPre = new Array(numPlayers).fill(false)
@@ -584,12 +833,16 @@ const makeTracker = (numPlayers) => {
       // move it however the model changed.
       wtsd: st.sawFlop ? (st.showdowns / st.sawFlop) * 100 : 0,
       sawFlop: st.hands ? (st.sawFlop / st.hands) * 100 : 0,
-      bb100: st.hands ? (st.chips / bigBlind / st.hands) * 100 : 0
+      bb100: st.hands ? (st.chips / bigBlind / st.hands) * 100 : 0,
+      threeBet: st.threeBetOpp ? (st.threeBet / st.threeBetOpp) * 100 : 0,
+      foldTo3bet: st.foldTo3betOpp ? (st.foldTo3bet / st.foldTo3betOpp) * 100 : 0,
+      foldToSteal: st.stealOpp ? (st.foldToSteal / st.stealOpp) * 100 : 0,
+      premiumFold: st.premiumOpp ? (st.premiumFold / st.premiumOpp) * 100 : 0
     }))
   }
 }
 
 module.exports = {
-  makePlayer, archetype, ARCHETYPES, DEFAULT_TRAITS, makeTracker,
+  makePlayer, archetype, ARCHETYPES, DEFAULT_TRAITS, makeTracker, raiserRange,
   actionValues, applyTraits, choose, PARAMS, setParams, setArchetype
 }

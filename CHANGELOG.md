@@ -10,7 +10,73 @@ could not be right.
 
 ---
 
-## Unreleased: finishing the Hold'em player model
+## Unreleased: a strategy solver, and the preflop model it broke
+
+### A solver that found the field's leak in one run
+
+`texas-strategy.js` is the blackjack solver's idea applied to Hold'em: a
+preflop chart (seat x situation x hand -> fold/call/raise, with sizings a person
+uses without thinking), valued one decision at a time. Each deal is played as
+the chart says, then replayed from the same deck and the same random draws for
+everybody with the hero forced into each other action at one decision. Every
+replay forced back to the chart's own action reproduced the original result
+exactly (3,537 of 3,537), so the difference between replays is the value of the
+decision and nothing else.
+
+Its first chart beat the plain fitted TAG by **+625 bb/100** on fresh deals, and
+told you to 4-bet 72o. A strategy that wins 6 big blinds a hand has found a
+bug, not a strategy.
+
+### The fitted field folded aces
+
+Asked directly, the fitted TAG in the big blind folded AA to a 3bb open 45% of
+the time and to an all-in 100% of the time; the nit folded AA to an open 72%
+of the time. The cause was `callShadePre`, which discounted preflop equity by
+`callShadePre x price` and which the fit had run to 3.48: at any real raise the
+discounted equity is negative, so no fitted player ever just called a raise,
+with anything. VPIP, PFR, AF and WTSD all came out on target, because they
+count how often a player acts and not with what. What is not measured is not
+constrained -- the same lesson as the TAG with an aggression factor of 8.5,
+from the other side.
+
+Removing it showed the constant had been covering for the whole preflop
+valuation. Priced as a one-shot bet -- equity times pot, as if the hand went
+quietly to showdown -- a raise with aces under the gun was worth under half a
+big blind, because the value of aces is in streets that model never sees. With
+the constant gone the regulars limped 38% of hands and checked them down
+(WTSD 58 against 26), and even at near-zero decision noise they folded AA/KK
+8-11% of the time. Patches uncovered more holes than they closed: an
+expected-opponent count fed into the fold-equity term made every steal work
+half the time.
+
+### Preflop is now played the way people play it
+
+Before the flop the players now do what a person does:
+
+- **Unopened**, they know roughly where their hand ranks among the 169 and how
+  wide they open from this seat, and compare the two. Weak players rank hands
+  partly by heads-up equity against a random hand, the ranking that rates A2o
+  above 76s.
+- **Facing a raise**, they read the raiser's range from the number and size
+  of raises ("an open is about the top 21%, a 3-bet a third of that") and do
+  the pot-odds sum against it, charged for position and for being squeezed --
+  except when the money is all in, where neither applies. Equity against the
+  top X% of hands is a new table in `equity.json`
+  (`node texas-equity.js --build-ranges`).
+- Personality and proficiency act on these values exactly as before, and
+  after the flop nothing changed.
+
+The calibration gained four statistics, as bands rather than points because
+published figures for them vary more by site and stake: 3-bet 5-9%, fold to a
+3-bet 45-65%, big blind folds to a steal 45-70%, and AA/KK folded to a bet
+0-1% (0-2% for every named type). The refit puts the regulars inside all four,
+the TAG holds AA and KK against any raise, and the sizing check -- the same
+TAG with a person's standard raise sizes -- no longer moves the win rate.
+
+What it cost is written into Limitations: every type now plays about 6 VPIP
+looser than its target, and the fish lose far faster than real fish do.
+
+## Earlier: finishing the Hold'em player model
 
 ### The constants were fitted for a different model
 

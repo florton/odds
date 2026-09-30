@@ -59,12 +59,28 @@ const OUT_FILE = path.join(__dirname, 'calibration.json')
 // quarter of the hands they play. Roughly 60% of hands are folded round before
 // a flop is ever dealt, which is the statistic that most obviously distinguishes
 // a real game from a simulation where everybody plays.
+//
+// The last four are what a raise does to them, and they are bands, not points:
+// a fitted value anywhere inside costs nothing. Published population figures
+// for these vary by site and stake more than the first four do, and a band says
+// only what is actually known -- that a regular 3-bets somewhere around 5-9% of
+// the time, folds to a 3-bet about half the time, defends the big blind against
+// a steal less often than not, and never folds aces or kings before the flop.
+//
+// They were added after the fit, graded on the first five alone, found a field
+// that folded AA to 45% of opens and to every shove: all five statistics on
+// target, the game underneath them absurd. What is not measured is not
+// constrained, again.
 const REG_TARGETS = {
   vpip: 22,
   pfr: 18,
   af: 2.5,
   wtsd: 26,
-  endsPreflop: 60
+  endsPreflop: 60,
+  threeBet: [5, 9],
+  foldTo3bet: [45, 65],
+  foldToSteal: [45, 70],
+  premiumFold: [0, 1]
 }
 
 // Named players in a mixed game. Real population stats vary by stake and site,
@@ -80,13 +96,17 @@ const REG_TARGETS = {
 // called anything. The calling station only stopped being nonsense once the
 // showdown rate that actually defines a station entered its targets. What is
 // not measured is not constrained.
+// Every type also carries the premium-fold guard: however loose, tight, wild
+// or passive, nobody folds aces preflop.
 const FIELD_TARGETS = {
-  nit: { vpip: 13, pfr: 10, af: 2.2, wtsd: 24 },
-  tag: { vpip: 22, pfr: 19, af: 2.6, wtsd: 26 },
-  lag: { vpip: 32, pfr: 25, af: 3.2, wtsd: 29 },
-  station: { vpip: 45, pfr: 6, af: 0.6, wtsd: 42 },
-  maniac: { vpip: 62, pfr: 38, af: 2.4, wtsd: 36 }
+  nit: { vpip: 13, pfr: 10, af: 2.2, wtsd: 24, premiumFold: [0, 2] },
+  tag: { vpip: 22, pfr: 19, af: 2.6, wtsd: 26, premiumFold: [0, 2] },
+  lag: { vpip: 32, pfr: 25, af: 3.2, wtsd: 29, premiumFold: [0, 2] },
+  station: { vpip: 45, pfr: 6, af: 0.6, wtsd: 42, premiumFold: [0, 2] },
+  maniac: { vpip: 62, pfr: 38, af: 2.4, wtsd: 36, premiumFold: [0, 2] }
 }
+
+const RESPONSE_KEYS = ['threeBet', 'foldTo3bet', 'foldToSteal', 'premiumFold']
 
 // The starting proficiencies. The fit may move them per archetype via the
 // profile's `skill` key, which overrides these once written to
@@ -146,13 +166,15 @@ const measureRegs = (params, hands, seed, proficiency = 0.85) => {
   const players = []
   for (let i = 0; i < 6; i++) players.push(makePlayer('reg' + i, { proficiency, rng }))
   const { rows, endsPreflop } = runField(players, hands, seed)
-  return {
+  const out = {
     vpip: average(rows, 'vpip'),
     pfr: average(rows, 'pfr'),
     af: average(rows, 'af'),
     wtsd: average(rows, 'wtsd'),
     endsPreflop
   }
+  for (const k of RESPONSE_KEYS) out[k] = average(rows, k)
+  return out
 }
 
 // A mixed table, one of each named type. Population statistics are gathered
@@ -167,20 +189,18 @@ const measureArchetypes = (params, traits, hands, seed) => {
   const players = kinds.map((k, i) =>
     archetype(k, fieldSkill(k), rng, k + i))
   const { rows } = runField(players, hands, seed)
+  const keys = ['vpip', 'pfr', 'af', 'wtsd', ...RESPONSE_KEYS]
   const out = {}
   kinds.forEach((k, i) => {
-    if (!out[k]) out[k] = { vpip: 0, pfr: 0, af: 0, wtsd: 0, n: 0 }
-    out[k].vpip += rows[i].vpip
-    out[k].pfr += rows[i].pfr
-    out[k].af += isFinite(rows[i].af) ? rows[i].af : 0
-    out[k].wtsd += rows[i].wtsd
+    if (!out[k]) {
+      out[k] = { n: 0 }
+      for (const key of keys) out[k][key] = 0
+    }
+    for (const key of keys) out[k][key] += isFinite(rows[i][key]) ? rows[i][key] : 0
     out[k].n++
   })
   for (const k of Object.keys(out)) {
-    out[k].vpip /= out[k].n
-    out[k].pfr /= out[k].n
-    out[k].af /= out[k].n
-    out[k].wtsd /= out[k].n
+    for (const key of keys) out[k][key] /= out[k].n
   }
   return out
 }
@@ -201,7 +221,20 @@ const errorAgainst = (got, targets) => {
       n++
       continue
     }
-    const d = (have - want) / want
+    // A band costs nothing inside it, and outside it the distance to the
+    // nearer edge, relative to the band's middle -- or to 5 points, for a band
+    // near zero, whose middle would otherwise make a fraction of a percent
+    // outweigh every other statistic together. It did: scaled by its middle
+    // of 1, the premium-fold guard was 40% of the whole archetype error and
+    // no stage 3 move could get past it.
+    let d
+    if (Array.isArray(want)) {
+      const [lo, hi] = want
+      const off = have < lo ? lo - have : have > hi ? have - hi : 0
+      d = off / Math.max(5, (lo + hi) / 2)
+    } else {
+      d = (have - want) / want
+    }
     total += d * d
     n++
   }
@@ -230,12 +263,25 @@ const BOUNDS = {
   foldBase: [0.0, 0.6],
   foldSlope: [0.05, 1.5],
   stubbornness: [0.05, 0.95],
-  callShadePre: [0.0, 4.0],
+  rangeOpen: [4, 60],
+  rangeStep: [0.05, 0.9],
+  rangeSizeExp: [0.0, 2.0],
   callShadePost: [0.0, 0.99],
   raiseShade: [0.0, 0.99],
   temperature: [0.05, 6.0],
+  temperaturePre: [0.02, 6.0],
   temperatureCurve: [0.05, 2.0],
-  pullPosition: [0.02, 1.20],
+  // Wider since realisation scales with (1 - equity): the same pull now costs
+  // a typical hand about half what it did.
+  pullPosition: [0.02, 3.0],
+  enterRate: [0.02, 1.0],
+  raiseBehind: [0.0, 0.5],
+  openBase: [5, 100],
+  openDecay: [0.3, 1.0],
+  limpedMult: [0.3, 1.5],
+  limpGap: [0.0, 0.5],
+  chartScale: [0.2, 20],
+  threeBetEq: [0.3, 0.9],
   positionPostWeight: [0.0, 1.0],
   // The 2026-09 refit pinned this at 1.2 with the calling station's WTSD still
   // half its target: the ceiling, not the stickiness trait, was what stopped
@@ -453,11 +499,18 @@ const searchTraits = (startTraits, params, hands, seed, passes, starts = 3) => {
 
 // ---------------------------------------------------------------- reporting
 
+const targetText = (want) => Array.isArray(want) ? want[0] + '-' + want[1] : String(want)
+
+const onTarget = (got, want) => {
+  if (!isFinite(got)) return false
+  if (Array.isArray(want)) return got >= want[0] && got <= want[1]
+  return Math.abs((got - want) / want) < 0.15
+}
+
 const line = (name, got, want) => {
   const g = isFinite(got) ? got.toFixed(1) : 'inf'
-  const mark = isFinite(got) && Math.abs((got - want) / want) < 0.15 ? 'ok' : ''
-  return '  ' + name.padEnd(14) + g.padStart(7) + want.toFixed(1).padStart(9) +
-    '   ' + mark
+  return '  ' + name.padEnd(14) + g.padStart(7) + targetText(want).padStart(9) +
+    '   ' + (onTarget(got, want) ? 'ok' : '')
 }
 
 const reportRegs = (stats) => {
@@ -471,13 +524,17 @@ const reportRegs = (stats) => {
 const reportArchetypes = (got) => {
   console.log('\nMixed field   (measured / target)')
   console.log('  ' + 'type'.padEnd(9) + 'VPIP'.padStart(12) + 'PFR'.padStart(12) +
-    'AF'.padStart(12) + 'WTSD'.padStart(12))
-  const cell = (have, want) =>
-    ((isFinite(have) ? have.toFixed(1) : 'inf') + '/' + want).padStart(12)
+    'AF'.padStart(12) + 'WTSD'.padStart(12) + 'AA/KK fold'.padStart(13) +
+    '3bet'.padStart(7) + 'F3bet'.padStart(7) + 'FSteal'.padStart(8))
+  const cell = (have, want, w = 12) =>
+    ((isFinite(have) ? have.toFixed(1) : 'inf') + '/' + targetText(want)).padStart(w)
+  const bare = (have, w) => (isFinite(have) ? have.toFixed(1) : '-').padStart(w)
   for (const k of Object.keys(FIELD_TARGETS)) {
     const t = FIELD_TARGETS[k]
     console.log('  ' + k.padEnd(9) + cell(got[k].vpip, t.vpip) +
-      cell(got[k].pfr, t.pfr) + cell(got[k].af, t.af) + cell(got[k].wtsd, t.wtsd))
+      cell(got[k].pfr, t.pfr) + cell(got[k].af, t.af) + cell(got[k].wtsd, t.wtsd) +
+      cell(got[k].premiumFold, t.premiumFold, 13) + bare(got[k].threeBet, 7) +
+      bare(got[k].foldTo3bet, 7) + bare(got[k].foldToSteal, 8))
   }
 }
 
@@ -671,8 +728,9 @@ if (require.main === module) {
     // Stage one. Neutral traits, so the four personality scales are multiplied
     // by zero and cannot affect anything -- this fits the value model alone.
     console.log('\nStage 1: the value model, against a table of regulars')
-    const stage1Keys = ['foldBase', 'foldSlope', 'stubbornness', 'callShadePre',
-      'callShadePost', 'raiseShade', 'temperature', 'pullPosition',
+    const stage1Keys = ['foldBase', 'foldSlope', 'stubbornness',
+      'openBase', 'openDecay', 'limpedMult', 'limpGap', 'chartScale', 'threeBetEq',
+      'rangeOpen', 'rangeStep', 'rangeSizeExp', 'enterRate', 'raiseBehind', 'callShadePost', 'raiseShade', 'temperature', 'temperaturePre', 'pullPosition',
       'positionPostWeight', 'futureCost',
       'callShadePostBase']
     const s1 = search(baseline, stage1Keys,

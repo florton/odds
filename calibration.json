@@ -3,67 +3,78 @@
     "pullAggression": 0.7633074549942017,
     "pullLooseness": 1.2232032669996509,
     "pullStickiness": 0.5703626220703124,
-    "pullBluffiness": 0.7311517650595242,
+    "pullBluffiness": 0.7208699433633746,
     "handOvervalue": 0,
-    "foldBase": 0.1584793713331904,
-    "foldSlope": 0.6737500000000001,
-    "stubbornness": 0.4809875391580878,
-    "callShadePre": 3.4756607666015626,
-    "callShadePost": 0.052384645260392146,
-    "raiseShade": 0.67528125,
-    "callShadePostBase": 0.2997596250184264,
-    "futureCost": 0.10631930447177246,
-    "temperature": 1.6994578125,
+    "foldBase": 0.15045635315944766,
+    "foldSlope": 0.2955235937500001,
+    "stubbornness": 0.24196288155760787,
+    "rangeOpen": 25.878125,
+    "rangeStep": 0.32615625,
+    "rangeSizeExp": 0.1683898755614517,
+    "enterRate": 0.32615625,
+    "raiseBehind": 0.147,
+    "openBase": 55.12500000000001,
+    "openDecay": 0.5053125,
+    "limpedMult": 1.1025,
+    "limpGap": 0.07815500000000002,
+    "chartScale": 1.6500000000000001,
+    "threeBetEq": 0.547375,
+    "callShadePost": 0.054442594723328123,
+    "raiseShade": 0.599312109375,
+    "callShadePostBase": 0.2019630473561648,
+    "futureCost": 0.14213592957148924,
+    "temperature": 1.3609687061920712,
+    "temperaturePre": 0.6,
     "temperatureCurve": 0.5760967041015623,
-    "pullPosition": 0.54977712890625,
-    "positionPostWeight": 0.5475675143445587,
-    "maxBias": 2
+    "pullPosition": 0.9765416252197265,
+    "positionPostWeight": 0.6707702050720845,
+    "maxBias": 1.1
   },
   "archetypes": {
     "nit": {
-      "looseness": 0.02,
-      "preflopAggression": 0.27999999999999997,
-      "aggression": 0.3950000000000001,
-      "stickiness": 0.495,
-      "bluffiness": 0.35,
-      "skill": 0.7,
-      "stickinessScale": 3.734565625
+      "looseness": 0.38,
+      "preflopAggression": 0.44000000000000006,
+      "aggression": 0.5225000000000001,
+      "stickiness": 0.4349999999999999,
+      "bluffiness": 0.2025,
+      "skill": 0.8799999999999999,
+      "stickinessScale": 0.7364141689872057
     },
     "tag": {
-      "looseness": 0.45000000000000007,
-      "preflopAggression": 0.61,
-      "aggression": 0.42249999999999993,
-      "stickiness": 0.355,
-      "bluffiness": 0.44999999999999996,
-      "skill": 0.85,
-      "stickinessScale": 0.8425703125000001
+      "looseness": 0.6100000000000001,
+      "preflopAggression": 0.57,
+      "aggression": 0.5825,
+      "stickiness": 0.4749999999999999,
+      "bluffiness": 0.4549999999999999,
+      "skill": 0.95,
+      "stickinessScale": 0.9959976269482427
     },
     "lag": {
-      "looseness": 0.39,
-      "preflopAggression": 0.5699999999999998,
-      "aggression": 0.5499999999999999,
-      "stickiness": 0.8099999999999999,
-      "bluffiness": 0.885,
-      "skill": 0.64,
-      "stickinessScale": 0.33687500000000004
+      "looseness": 0.6699999999999999,
+      "preflopAggression": 0.4899999999999998,
+      "aggression": 0.71,
+      "stickiness": 0.6774999999999999,
+      "bluffiness": 0.98,
+      "skill": 0.7999999999999999,
+      "stickinessScale": 0.25
     },
     "station": {
-      "looseness": 0.8,
-      "preflopAggression": 0.04000000000000001,
-      "aggression": 0.3275,
-      "stickiness": 0.9725,
-      "bluffiness": 0.5650000000000001,
-      "skill": 0.63,
-      "stickinessScale": 1.5006250000000003
+      "looseness": 0.9,
+      "preflopAggression": 0.42,
+      "aggression": 0.5275,
+      "stickiness": 0.98,
+      "bluffiness": 0.6050000000000001,
+      "skill": 0.75,
+      "stickinessScale": 0.948108474414063
     },
     "maniac": {
-      "looseness": 0.8200000000000002,
-      "preflopAggression": 0.9400000000000001,
-      "aggression": 0.6099999999999999,
-      "stickiness": 0.8525,
-      "bluffiness": 0.4975000000000001,
-      "skill": 0.49,
-      "stickinessScale": 0.9226738281250002
+      "looseness": 0.98,
+      "preflopAggression": 0.86,
+      "aggression": 0.8099999999999998,
+      "stickiness": 0.94,
+      "bluffiness": 0.7525000000000002,
+      "skill": 0.69,
+      "stickinessScale": 0.865237382324219
     }
   },
   "targets": {
@@ -72,87 +83,147 @@
       "pfr": 18,
       "af": 2.5,
       "wtsd": 26,
-      "endsPreflop": 60
+      "endsPreflop": 60,
+      "threeBet": [
+        5,
+        9
+      ],
+      "foldTo3bet": [
+        45,
+        65
+      ],
+      "foldToSteal": [
+        45,
+        70
+      ],
+      "premiumFold": [
+        0,
+        1
+      ]
     },
     "field": {
       "nit": {
         "vpip": 13,
         "pfr": 10,
         "af": 2.2,
-        "wtsd": 24
+        "wtsd": 24,
+        "premiumFold": [
+          0,
+          2
+        ]
       },
       "tag": {
         "vpip": 22,
         "pfr": 19,
         "af": 2.6,
-        "wtsd": 26
+        "wtsd": 26,
+        "premiumFold": [
+          0,
+          2
+        ]
       },
       "lag": {
         "vpip": 32,
         "pfr": 25,
         "af": 3.2,
-        "wtsd": 29
+        "wtsd": 29,
+        "premiumFold": [
+          0,
+          2
+        ]
       },
       "station": {
         "vpip": 45,
         "pfr": 6,
         "af": 0.6,
-        "wtsd": 42
+        "wtsd": 42,
+        "premiumFold": [
+          0,
+          2
+        ]
       },
       "maniac": {
         "vpip": 62,
         "pfr": 38,
         "af": 2.4,
-        "wtsd": 36
+        "wtsd": 36,
+        "premiumFold": [
+          0,
+          2
+        ]
       }
     }
   },
   "fitted": {
     "regulars": {
-      "vpip": 23.922916666666666,
-      "pfr": 17.247916666666665,
-      "af": 2.5069358381679465,
-      "wtsd": 25.998758553708637,
-      "endsPreflop": 64.275
+      "vpip": 23.52916666666667,
+      "pfr": 16.879166666666666,
+      "af": 2.511588835523277,
+      "wtsd": 25.775822229348424,
+      "endsPreflop": 62.824999999999996,
+      "threeBet": 7.200471280785091,
+      "foldTo3bet": 44.48729000992042,
+      "foldToSteal": 70.52077201221212,
+      "premiumFold": 0.3968253968253968
     },
     "field": {
       "nit": {
-        "vpip": 11.725,
-        "pfr": 10.5125,
-        "af": 2.1642512077294684,
-        "wtsd": 23.366013071895424,
-        "n": 1
+        "n": 1,
+        "vpip": 16.6,
+        "pfr": 12.35,
+        "af": 2.3404825737265416,
+        "wtsd": 27.69070010449321,
+        "threeBet": 2.9356652092442226,
+        "foldTo3bet": 81.25,
+        "foldToSteal": 91.42857142857143,
+        "premiumFold": 1.9801980198019802
       },
       "tag": {
-        "vpip": 24.025,
-        "pfr": 18.15625,
-        "af": 2.544418978811244,
-        "wtsd": 27.529264011327378,
-        "n": 2
+        "n": 2,
+        "vpip": 27.04375,
+        "pfr": 18.98125,
+        "af": 2.7356628348255407,
+        "wtsd": 33.94519477543221,
+        "threeBet": 4.809127094228549,
+        "foldTo3bet": 22.279102384291726,
+        "foldToSteal": 68.50607609660534,
+        "premiumFold": 0
       },
       "lag": {
-        "vpip": 31.45,
-        "pfr": 24.825,
-        "af": 3.003616636528029,
-        "wtsd": 31.3893653516295,
-        "n": 1
+        "n": 1,
+        "vpip": 35.099999999999994,
+        "pfr": 12.725,
+        "af": 2.963582677165354,
+        "wtsd": 40.19193857965451,
+        "threeBet": 5.761689291101056,
+        "foldTo3bet": 12.121212121212121,
+        "foldToSteal": 32.743362831858406,
+        "premiumFold": 1.0204081632653061
       },
       "station": {
-        "vpip": 49.4625,
-        "pfr": 5.75,
-        "af": 0.5900396968603392,
-        "wtsd": 37.86591123701605,
-        "n": 1
+        "n": 1,
+        "vpip": 54.83749999999999,
+        "pfr": 5.9375,
+        "af": 0.7069977426636569,
+        "wtsd": 43.93373775081662,
+        "threeBet": 0.7303077725612936,
+        "foldTo3bet": 3,
+        "foldToSteal": 4.40251572327044,
+        "premiumFold": 0
       },
       "maniac": {
-        "vpip": 67.83749999999999,
-        "pfr": 40.0375,
-        "af": 2.1149847094801224,
-        "wtsd": 31.16849243609807,
-        "n": 1
+        "n": 1,
+        "vpip": 61,
+        "pfr": 32.3625,
+        "af": 1.741393442622951,
+        "wtsd": 39.68215158924205,
+        "threeBet": 9.381755296152184,
+        "foldTo3bet": 1.4084507042253522,
+        "foldToSteal": 0,
+        "premiumFold": 0
       }
     }
   },
   "hands": 8000,
-  "generated": "2026-09-29T21:46:18.095Z"
+  "generated": "2026-09-30T03:39:02.249Z"
 }
