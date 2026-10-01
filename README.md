@@ -32,9 +32,10 @@ interesting engineering is about making those errors small enough to say somethi
   tens of bb/100, and at fixed style every step of proficiency from 0.25 to
   1.0 is worth more money than the one before.
 - **A preflop rule solver** that answers in the form a player carries --
-  "raise the top X% from this seat" -- with the noise on every cutoff. Its
-  main result so far is diagnostic: each exploit it found was a hole in the
-  field the fit statistics had missed.
+  "raise the top X% from this seat" -- with the noise on every cutoff, against
+  a table that reads the hero's real frequencies. Against regulars it now
+  solves a believable chart within a few bb/100 of the plain TAG; each larger
+  edge it found was a hole in the field the fit statistics had missed.
 
 ## Quick start
 
@@ -53,6 +54,8 @@ node texas-eval.js --enumerate     # verify the evaluator on all 133M seven-card
 node texas-calibrate.js --check    # how well the players match real statistics
 node texas-results.js              # who wins, with error bars   -> results.json
 node texas-strategy.js             # solve preflop rules vs the realistic field -> rules.json
+node texas-strategy.js 800 --field tough --passes 5   # the settings rules.json was made with
+node texas-strategy.js --show      # print the saved rules
 node texas-strategy.js --agree --cross   # compare saved fields' rules, replay each in the others
 
 node deal.js                       # Monty Hall, 10M runs
@@ -186,19 +189,24 @@ The named types, averaged over three held-out seeds:
 
 | Type | VPIP | PFR | AF | WTSD | Fold to c-bet | W$SD | Fold to 3-bet | bb/100 |
 |---|---|---|---|---|---|---|---|---|
-| nit | 16.2 / 13 | 10.2 / 10 | 2.1 / 2.2 | 20.0 / 24 | 37.8 / 50-70 | 59.6 / 52-62 | 88.8 / 55-75 | +7.7 |
-| tag | 23.8 / 22 | 18.0 / 19 | 2.4 / 2.6 | 20.9 / 26 | 51.7 / 38-55 | 55.7 / 48-56 | 52.5 / 45-65 | +31.8 |
-| lag | 25.2 / 32 | 16.5 / 25 | 3.3 / 3.2 | 20.0 / 29 | 35.9 / 33-50 | 50.1 / 46-54 | 41.1 / 35-55 | +22.1 |
-| station | 38.3 / 45 | 5.2 / 6 | 0.9 / 0.6 | 20.0 / 42 | 41.1 / 20-35 | 48.6 / 40-48 | 8.7 / 20-45 | −55.9 |
-| maniac | 42.4 / 62 | 27.6 / 38 | 3.4 / 2.4 | 17.9 / 36 | 40.7 / 25-45 | 42.1 / 40-50 | 6.5 / 20-45 | −37.5 |
+| nit | 16.1 / 13 | 10.0 / 10 | 2.1 / 2.2 | 24.2 / 24 | 37.2 / 50-70 | 53.3 / 52-62 | 81.9 / 55-75 | −4.6 |
+| tag | 23.7 / 22 | 18.1 / 19 | 2.4 / 2.6 | 24.7 / 26 | 49.5 / 38-55 | 57.9 / 48-56 | 51.9 / 45-65 | +49.6 |
+| lag | 25.5 / 32 | 16.3 / 25 | 3.8 / 3.2 | 25.5 / 29 | 40.2 / 33-50 | 48.3 / 46-54 | 42.7 / 35-55 | +2.2 |
+| station | 38.2 / 45 | 5.4 / 6 | 0.5 / 0.6 | 30.8 / 42 | 19.9 / 20-35 | 47.7 / 40-48 | 10.2 / 20-45 | −42.5 |
+| maniac | 42.4 / 62 | 27.8 / 38 | 1.9 / 2.4 | 24.6 / 36 | 26.0 / 25-45 | 41.8 / 40-50 | 7.4 / 20-45 | −54.3 |
 
-*measured / target*
+*measured / target; bb/100 moves by ±10 or so between runs*
 
-The TAG is the best-fitted type it has ever been. The fish are not: they lose
-realistic amounts, but after the flop they fold like regulars, and the maniac
-plays 42% of hands against 62. A fit that made them call down like fish
-(station WTSD 32, fold to c-bet 17) had them losing 124-143 bb/100 and the TAG
-winning 138 -- see Limitations for that trade and why this one was kept.
+The fish carry one hand-set exception, `chase`. After the flop, a hand with
+hope gets extra value for calling: a pair using a hole card (bottom pair
+included), a straight draw (gutshots included), a flush draw, or a backdoor
+flush on the flop. Ace-high and two overcards count weakly. Air gets nothing.
+It took the fish's fold to c-bet from about 41% into their bands. Their
+showdown rate rose from 20 to 31 (station) and 18 to 25 (maniac), while they
+still lose realistic amounts. The rest of the WTSD gap is hands with nothing,
+and missed draws that fold on the river. The maniac still plays 42% of hands
+against 62. An earlier fit that made the fish call down through stickiness
+had them losing 124-143 bb/100 and the TAG winning 138 -- see Limitations.
 
 ### Who wins
 
@@ -275,22 +283,40 @@ and the same random draws. Each cutoff comes with the stretch of the ranking
 where it is within noise, and each rule with what it costs against playing
 every band its own best action.
 
-The rules it solves are **not advice yet**, and the reason is the finding.
-Solved against the fitted field they limp a third to two thirds of hands,
-re-raise 25-50% of hands when raised, and beat the plain fitted TAG by
-+77 to +158 bb/100 depending on the field -- and every field's rules win about
-as much in the other fields. Real edges over a competent regular are a few
-bb/100, so these are exploits of the model, and the solver found each one
-faster than any statistic did. Decomposed, most of the edge is one line:
-limp, and re-raise whoever isolates, with a hand the TAG would fold. The
-isolator folds 59% of the time -- inside the published fold-to-3-bet band --
-and when called, the junk loses only about a big blind after the flop. A
-real table would adapt to a player who limp-reraised half their hands inside
-an orbit; this field never adapts, and a best response to a static field
-exploits the fact. The earlier exploits it found (a TAG type that folded to
-3-bets 80% of the time, a station that called pot-sized river bets with
-nothing) were fixed in the model; this one is a limit of solving against a
-field that does not learn.
+A best response to a fixed field finds whatever the field gets wrong, so the
+edge over the plain fitted TAG is the check on the field: real edges over a
+competent regular are a few bb/100. The first rules solved here beat it by
++77 to +158 bb/100 by limping a third of their hands and re-raising whoever
+isolated -- the field read every re-raise as the top 3% of hands, whoever
+made it. Two things closed that:
+
+- **The table reads the hero.** A regular facing a re-raise reads it at the
+  frequency the hero's rules actually make it (a fish keeps the population
+  read; in between, by skill), averaged over every rule set the hero has
+  played, so the solve ends where the rules and the table's read of them
+  agree. `--no-reads` turns it off.
+- **No open-limping.** The field still isolates limpers too wide, and has no
+  read on limps to stop with, so the rules raise or fold when nobody has
+  raised. `--allow-limp` puts limping back.
+
+| Field | Edge over the TAG, first rules | Reads | Reads, no limping |
+|---|---|---|---|
+| tough | +77 | +34 | **+15** |
+| realistic | +127 | +110 | **+78** (+87 with fish chase) |
+| soft | +158 | +149 | **+84** (+94 with fish chase) |
+
+The tough-field rules now read like a real chart (open about 17% under the
+gun to 60-70% on the button and small blind, 3-bet tight) and their edge is a
+few bb/100 of wider opening. **Those are the ones to trust**, and they are
+the only ones that travel: played in every field (`--agree --cross`), the
+tough rules beat the TAG by +16.5, +40.9 and +48.8 bb/100 (tough, realistic,
+soft), while the realistic and soft rules lose about 8-10 bb/100 to it at a
+table of regulars -- they are aimed at fish. The realistic
+and soft rules open and 3-bet much wider into the fish. That is right in
+direction, but the size is still uncertain, because the fish's showdown
+rates remain below target (see Limitations). Earlier exploits it found -- a TAG type
+that folded to 3-bets 80% of the time, a station that called pot-sized river
+bets with nothing -- were fixed in the model.
 
 ## Measuring honestly
 
@@ -316,11 +342,10 @@ attempt without it failed:
 
 ## Limitations
 
-**Hold'em.** The fish either look like fish or lose like fish, not both. In
-the fit kept here they lose realistic amounts (station −57.7, maniac −56.8 at
-the realistic table) but fold after the flop like regulars -- the station
-shows down 20% of the flops it sees against a target of 42 -- and the maniac
-plays 42% of hands against 62. A resumed fit that weighted each type's four
+**Hold'em.** The fish are only partly fish. The hand-set `chase` exception
+makes them call c-bets with pairs and draws, but they still show down fewer
+flops than real fish (station 31 against 42, maniac 25 against 36), and the
+maniac plays 42% of hands against 62. A resumed fit that weighted each type's four
 defining statistics as half its error, started from a stickier station and a
 looser maniac (`--resume maxBias=0.9` with station `stickinessScale` 3 and
 maniac `looseness` 0.98), made them call down like fish (station WTSD 32,
@@ -330,12 +355,13 @@ does it loses far faster than a real one; the fit that keeps the money
 realistic was kept. Aces still win 15.6 bb a hand, a few times the real
 figure, and the button does not clearly out-earn the cutoff.
 
-The preflop rules solved against this field exploit it rather than describe
-good play (see above): a static field that never adapts can be limp-reraised
-forever, and no statistic in the fit says otherwise. Behavioural targets --
-even money ones -- constrain what a field does on average; a best response
-finds whatever the averages leave out, and has found something new after
-every refit so far.
+The preflop rules are only as good as the field. The table reads the hero's
+preflop re-raises, but nothing else: it has no read on the hero's limps (so
+the rules are not allowed to limp) or on anything after the flop.
+Behavioural targets -- even money ones -- constrain what a field does on
+average; a best response finds whatever the averages leave out, and has found
+something new after every refit so far. Against fields with fish, the rules'
+edge is still far above real-world size, partly because of the fish problem above.
 
 The traits and pulls are a coordinate-descent optimum, so the answer depends
 on the path: four refits in a row landed in different places on the same

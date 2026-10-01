@@ -138,6 +138,81 @@ never adapts, and a best response to a static field finds it. The two earlier
 exploits it found were holes in the fit and were closed; this one is a limit
 of solving against a field that does not learn.
 
+### The table reads the hero, and the rules stop limping
+
+Two changes took most of that edge out.
+
+**The field reads the hero.** Every preflop re-raise used to be read as the
+population's range for that many raises -- the fitted read puts a 3-bet at the
+top 2.7% of hands -- whoever made it and however often they made it. A
+regular who has watched someone limp-reraise a third of their hands reads it
+at a third. `raiserRange` now takes a read on a seat when one is supplied, and
+each reader blends it with the population read in proportion to their skill:
+a regular goes by the HUD, a fish by habit. The solver supplies the hero's
+real frequencies -- for the hero's whole line this hand, from the rules -- and
+averages them over every rule set the hero has played, so the table learns
+but does not forget a line the moment the hero drops it, and the solve
+settles where the rules and the read of them agree. Validation is measured
+with the table reading the final rules. Under the read, the old tough-field
+rules went from +64 over the TAG to −45; re-solved, the edges were +34, +110
+and +149 bb/100. `--no-reads` turns it off.
+
+**No open-limping.** Even reading the re-raise right, the field isolates
+every limper as wide as ever and folds the bottom of that range to the
+re-raise -- correctly, given how wide it isolated. A real regular stops
+isolating a limper like that; this field has no read on limps to stop with.
+So by default the rules have no calling band when nobody has raised (raise or
+fold, the big blind's check aside), which is how winning players are taught to
+play anyway. `--allow-limp` puts it back.
+
+With both, the edge over the plain TAG fell to **+15** (tough), **+78**
+(realistic) and **+84** (soft) bb/100, and the tough-field rules read like a
+real chart: open about 17% under the gun widening to 60-70% on the button and
+small blind, 3-bet tight, defend the big blind with about a quarter of hands.
+Decomposed, the tough edge is a few bb/100 of wider opening, at the size the
+sanity rule allows. The realistic and soft edges are opening and 3-betting
+wider into the fish -- a real strategy, but too profitable here, because the
+kept fit's fish fold after the flop like regulars (held out: the station
+shows down 20% of the flops it sees against a target of 42, the maniac 18
+against 36). The fish are the next thing to fix, not the rules.
+
+Also fixed: `--passes 5` (or `--focus`) had its number read as the deal
+count.
+
+### Fish chase
+
+A fish does not fold a hand that could still get there. The two fish now
+carry a `chase` trait: postflop, a hand with hope gets `chase` pots added to
+the value of calling, past the personality ceiling. A hand has full hope with
+a pair that uses a hole card (bottom pair and underpairs included) or, with
+cards to come, any straight draw that uses a hole card (gutshots included),
+four to a flush, or a backdoor flush on the flop. It has weak hope
+(`highCardHope`, 0.3) with an ace, or with two overcards on the flop.
+Nothing else counts, so air still folds.
+
+The bonus is in pots, not in the price of the call. Sized to the bet, it was
+smaller than the fish's decision noise (about half a pot wide), and hopeful
+hands still folded at random on every street. Station `chase` is 0.9 and
+maniac 0.75, set by hand as the most that keeps each one's fold to c-bet
+inside its band. At full strength, ace-high pushed it under the band while
+adding only a point or two of WTSD.
+
+Held out, the station folds to a c-bet 20% of the time (was 41, target
+20-35) and shows down 31% of flops (was 20, target 42). The maniac folds 26%
+(was 41, target 25-45) and shows down 25% (was 18, target 36). The money
+stays sane: station about −42 bb/100, maniac −54, TAG +37 to +50 across
+runs. That is noisy, against +32 before and +138 in the refit that made the
+fish call down through stickiness. The rest of the WTSD gap is hands with
+nothing on the flop, and missed draws, which fold on the river as a real
+fish's would.
+
+Re-solved, the tough field has no fish and is unchanged (+15.0). The edge
+over the TAG rose from +78 to **+87** (realistic) and from +84 to **+94**
+(soft): fish that call more pay off more. Played in every field, the tough
+rules beat the TAG by +16.5 / +40.9 / +48.8 bb/100. The realistic rules go
+−9.7 / +77.8 / +92.4 and the soft rules −7.7 / +87.4 / +104.8. The tough
+rules are still the ones that travel.
+
 ## Unreleased: a strategy solver, and the preflop model it broke
 
 ### A solver that found the field's leak in one run

@@ -43,7 +43,8 @@ const DEFAULT_TRAITS = {
   stickiness: 0.5,   // prefers calling specifically -- the calling station axis
   bluffiness: 0.5,   // bets *because* the hand is weak, rather than despite it
   sizing: 0.6,       // preferred bet as a fraction of the pot
-  tilt: 0.0          // how much a recent loss loosens and angers the player
+  tilt: 0.0,         // how much a recent loss loosens and angers the player
+  chase: 0           // pots of value a hopeful hand adds to a postflop call
 }
 
 // ------------------------------------------------------------- parameters
@@ -88,6 +89,9 @@ const PARAMS = {
   // 38% of the time, and the only way the search had to raise that -- more
   // fold equity for every bet -- made everybody raise more and fold less.
   initiative: 0.15,
+  // How much of a fish's hope (see hopeOf) ace-high or two overcards carry,
+  // against 1 for a pair or a draw. Set by hand, not fitted.
+  highCardHope: 0.3,
 
   // How wide a player reads the last raiser's range before the flop, as a
   // percentage of all hands: an open is `rangeOpen`, each further raise
@@ -424,6 +428,65 @@ const applyTraits = (values, traits, equity, pot, tiltLevel, preflop, toCall = 0
   return out
 }
 
+// ------------------------------------------------------------------ hope
+//
+// The fish exception. A fish does not fold a hand that could still get there:
+// bottom pair, an underpair, a gutshot, four to a flush, three to a flush on
+// the flop. The equity says fold and the fish calls anyway, to see the next
+// card and usually the river. Stickiness could not produce this on its own --
+// it is a discount on every call, so turning it up far enough to keep bottom
+// pair in made the fish call down with air too, and turning it down left the
+// station folding pairs to a c-bet like a regular (WTSD 20 against 42).
+// Hope is about what the hand looks like, not what it is worth, so it is a
+// separate trait, applied only to hands that have some.
+//
+// A hand has hope when a hole card is part of it: a pocket pair, a hole card
+// paired on the board, or -- with cards still to come -- a straight draw of
+// any shape, four to a flush, or a backdoor flush on the flop. A draw made
+// only of board cards is everybody's draw and gives nobody a reason to call.
+// Ace-high and two overcards count too, but only weakly (highCardHope): at
+// full strength they took the fish's fold to c-bet under its target while
+// adding a point or two of WTSD, since a hand with nothing on the flop
+// mostly still has nothing on the river.
+const hopeOf = (hole, board) => {
+  const r0 = hole[0] >> 2
+  const r1 = hole[1] >> 2
+  if (r0 === r1) return 1
+  for (const c of board) {
+    const r = c >> 2
+    if (r === r0 || r === r1) return 1
+  }
+  if (board.length < 5 && drawing(hole, board)) return 1
+  // "I had ace high." Weak hope: an ace on any street, or two cards above
+  // the board on the flop, buys a fraction of the call bonus a pair gets.
+  if (r0 === 12 || r1 === 12) return PARAMS.highCardHope
+  if (board.length === 3 && board.every((c) => (c >> 2) < Math.min(r0, r1))) return PARAMS.highCardHope
+  return 0
+}
+
+const drawing = (hole, board) => {
+  const cards = hole.concat(board)
+  for (let suit = 0; suit < 4; suit++) {
+    if (!hole.some((c) => (c & 3) === suit)) continue
+    const n = cards.filter((c) => (c & 3) === suit).length
+    if (n >= 4 || (n === 3 && board.length === 3)) return true
+  }
+  // Ranks as a bit set, with the ace also counted low for the wheel.
+  const bits = (cs) => cs.reduce((m, c) => {
+    const r = c >> 2
+    return m | (1 << (r + 1)) | (r === 12 ? 1 : 0)
+  }, 0)
+  const all = bits(cards)
+  const mine = bits(hole)
+  for (let low = 0; low <= 9; low++) {
+    const window = 31 << low
+    let have = 0
+    for (let b = all & window; b; b &= b - 1) have++
+    if (have >= 4 && (mine & window)) return true
+  }
+  return false
+}
+
 // --------------------------------------------------------- the decision
 //
 // Softmax over the action values. Temperature is set by proficiency: at 1 the
@@ -505,19 +568,38 @@ const splitOpponents = (v) => {
 // this with, or null if nobody has raised. Everything it uses is on the table
 // -- how many raises, and how big the last one was relative to the bet it
 // raised.
-const raiserRange = (v) => {
+//
+// That is the read on a stranger, or on anyone playing the way the population
+// plays. A player who has sat with someone for a while has more: how often
+// that player actually takes this line. `seatRead`, when something has set it,
+// supplies that number for a seat, and a reader leans on it as far as they are
+// any good -- a regular reads the stat off the HUD, a fish keeps the
+// population read. Without it, a field can be beaten forever by a line it has
+// no reason to doubt: the first rules solved here limp-reraised a third of
+// all hands into regulars who read every re-raise as the top 3%.
+let seatRead = null
+const setSeatRead = (fn) => { seatRead = fn }
+
+const raiserRange = (v, skill = 0) => {
   let raises = 0
   let bet = v.bigBlind
   let size = 3
+  let raiser = -1
   for (const a of v.history) {
     if (a.street !== 'preflop' || a.type !== 'raise') continue
     size = a.to / bet
     bet = a.to
+    raiser = a.seat
     raises++
   }
   if (raises === 0) return null
-  const pct = PARAMS.rangeOpen * Math.pow(PARAMS.rangeStep, raises - 1) *
+  let pct = PARAMS.rangeOpen * Math.pow(PARAMS.rangeStep, raises - 1) *
     Math.pow(Math.min(1, 3 / size), PARAMS.rangeSizeExp)
+  const read = seatRead && skill > 0 ? seatRead(v, raiser) : null
+  if (read !== null && read !== undefined) {
+    const known = Math.max(1, Math.min(100, read))
+    pct = Math.exp((1 - skill) * Math.log(Math.max(1, pct)) + skill * Math.log(known))
+  }
   return Math.max(1, Math.min(100, pct))
 }
 
@@ -605,7 +687,7 @@ const preflopValues = (v, skill, sizing) => {
   const idx = handIndex(v.holeCards[0], v.holeCards[1])
   const pot = v.pot
   const values = { fold: 0 }
-  const range = raiserRange(v)
+  const range = raiserRange(v, skill)
   const { inAlready, pending } = splitOpponents(v)
   let strength
 
@@ -690,6 +772,13 @@ const makePlayer = (name, { traits = {}, proficiency = 0.5, rng = Math.random } 
         base = actionValues(v, equity, opponents, t.sizing)
       }
       const biased = applyTraits(base, t, equity, v.pot, player.tiltLevel, preflop, v.toCall)
+      // Hope is applied past the personality ceiling on purpose: the ceiling
+      // keeps traits from stacking into nonsense, and this is the one case
+      // where the nonsense is the point -- a fish calls a pot-sized bet with
+      // a gutshot.
+      if (!preflop && t.chase > 0 && biased.call !== undefined) {
+        biased.call += v.pot * t.chase * hopeOf(v.holeCards, v.board)
+      }
       const pick = choose(biased, proficiency, Math.max(v.bigBlind, v.pot), rng,
         preflop ? PARAMS.temperaturePre : PARAMS.temperature)
 
@@ -724,13 +813,17 @@ const makePlayer = (name, { traits = {}, proficiency = 0.5, rng = Math.random } 
 // global stickiness pull. One global pull cannot serve both the tag and the
 // calling station: the trait saturates at 0.98, which caps how far the bias
 // reaches, and a capped bias has no gradient left to fit with.
+// The two fish also carry `chase` (see hopeOf), set by hand rather than
+// fitted: each is the most hope that keeps its fold to c-bet inside the
+// target band (station 20 against 20-35, maniac 26 against 25-45). It lifts
+// held-out WTSD from 20 to 31 for the station and 18 to 25 for the maniac.
 const ARCHETYPES = {
   nit: { aggression: 0.30, looseness: 0.12, stickiness: 0.35, bluffiness: 0.10, sizing: 0.5, stickinessScale: 1 },
   rock: { aggression: 0.40, looseness: 0.25, stickiness: 0.40, bluffiness: 0.20, sizing: 0.5, stickinessScale: 1 },
   tag: { aggression: 0.75, looseness: 0.35, stickiness: 0.35, bluffiness: 0.55, sizing: 0.65, stickinessScale: 1 },
   lag: { aggression: 0.85, looseness: 0.65, stickiness: 0.40, bluffiness: 0.75, sizing: 0.75, stickinessScale: 1 },
-  station: { aggression: 0.15, looseness: 0.80, stickiness: 0.92, bluffiness: 0.10, sizing: 0.4, stickinessScale: 1 },
-  maniac: { aggression: 0.95, looseness: 0.90, stickiness: 0.50, bluffiness: 0.85, sizing: 0.9, stickinessScale: 1 },
+  station: { aggression: 0.15, looseness: 0.80, stickiness: 0.92, bluffiness: 0.10, sizing: 0.4, stickinessScale: 1, chase: 0.9 },
+  maniac: { aggression: 0.95, looseness: 0.90, stickiness: 0.50, bluffiness: 0.85, sizing: 0.9, stickinessScale: 1, chase: 0.75 },
   bluffer: { aggression: 0.70, looseness: 0.55, stickiness: 0.30, bluffiness: 0.95, sizing: 0.8, stickinessScale: 1 },
   // Cocky is the interesting one: aggressive, and it tilts, so its personality
   // is not constant across a session even though its parameters are.
@@ -1014,6 +1107,6 @@ const makeTracker = (numPlayers) => {
 }
 
 module.exports = {
-  makePlayer, archetype, ARCHETYPES, DEFAULT_TRAITS, makeTracker, raiserRange,
-  actionValues, applyTraits, choose, PARAMS, setParams, setArchetype
+  makePlayer, archetype, ARCHETYPES, DEFAULT_TRAITS, makeTracker, raiserRange, setSeatRead,
+  actionValues, applyTraits, choose, PARAMS, setParams, setArchetype, hopeOf
 }

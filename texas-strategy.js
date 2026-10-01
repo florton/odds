@@ -38,13 +38,18 @@
 //
 // What it cannot tell you is written down in advance: a chart solved here is
 // the best response to *this* field, which is fitted to what trackers measure
-// about real players and never adapts to the hero. Whatever those statistics
-// leave out, the best response finds -- so far a TAG type that folded to
-// 3-bets 80% of the time, a station that called river bets with nothing, and
-// a field that can be limp-reraised forever. That is why it can be solved
-// against several fields, why the output marks which cells agree, and why an
-// edge over the plain TAG of more than a few bb/100 is a finding about the
-// field before it is a strategy.
+// about real players. Whatever those statistics leave out, the best response
+// finds -- so far a TAG type that folded to 3-bets 80% of the time, a station
+// that called river bets with nothing, and a field that could be
+// limp-reraised forever because it read every re-raise as the top 3%. That
+// last one is not a statistic but a missing habit: a real table notices. So
+// the field reads the hero (see makeReads): a re-raise is read at the
+// frequency the hero's rules actually make it, as far as each reader is any
+// good, and the solve runs until the rules and the table's read of them
+// agree. `--no-reads` turns that off. An edge over the plain TAG of more than
+// a few bb/100 is still a finding about the field before it is a strategy,
+// which is why it is solved against several fields and the output marks
+// which cells agree.
 //
 // A 169-hand chart is also mostly noise at any affordable sample size, so the
 // default is not a chart but the rule a player actually carries: "raise the top
@@ -57,6 +62,8 @@
 //   node texas-strategy.js 2000 --field tough 2000 deals per seat/band per pass (default 800)
 //   node texas-strategy.js --chart            the full 169-hand chart instead
 //   node texas-strategy.js --no-rake          no rake (default: 5%, cap 3bb)
+//   node texas-strategy.js --no-reads         the table never reads the hero
+//   node texas-strategy.js --allow-limp       let the rules open-limp (see fitRules)
 //   node texas-strategy.js --show             print the saved rules (--chart: charts)
 //   node texas-strategy.js --agree            what the saved fields agree on
 //   node texas-strategy.js --agree --cross    and each field's rules played in the others
@@ -64,7 +71,7 @@
 const fs = require('fs')
 const path = require('path')
 const { playHand, makeRng, shuffle } = require('./texas-engine')
-const { archetype } = require('./texas-players')
+const { archetype, setSeatRead } = require('./texas-players')
 const { fieldSkill } = require('./texas-calibrate')
 const { handIndex, handLabel, handRank, preflopEquity } = require('./texas-equity')
 const { RANKS } = require('./texas-eval')
@@ -264,6 +271,73 @@ const makeHero = (name, chart, post, units = HAND_UNITS) => {
   return hero
 }
 
+// ------------------------------------------------------------- being read
+//
+// A table that has watched the hero play knows how often the hero takes each
+// line, and a regular facing a re-raise from them reads it at that frequency
+// rather than at the population's (texas-players.js, raiserRange). This is
+// that memory: every rule set the hero has played, and for any preflop line
+// -- the hero's actions this hand, in the situations they were taken in --
+// the share of all hands the rules play that way, averaged over the rule sets
+// the table has seen. Averaged, not the latest, so a line the hero drops is
+// not forgotten the next pass: the field learns, but slowly, and the solve
+// settles where the hero's lines and the table's read of them agree.
+//
+// A line no rule set has ever taken gets no read -- the stranger's read --
+// which is what anybody does with a line they have not seen.
+const makeReads = (units) => {
+  const seen = []
+  const cache = new Map()
+  const share = (chart, pos, steps) => {
+    let total = 0
+    for (let unit = 0; unit < units.count; unit++) {
+      const label = units.label(unit)
+      let follows = true
+      for (const [situation, type] of steps) {
+        const act = chart.get(cellKey(pos, situation, label))
+        if (act === undefined) return null
+        const ok = type === 'raise' ? act === 'raise' : type === 'call' ? act === 'call' : act !== 'raise'
+        if (!ok) { follows = false; break }
+      }
+      if (follows) total += units.weight(unit)
+    }
+    return total * 100
+  }
+  return {
+    remember: (chart) => {
+      seen.push(new Map(chart))
+      cache.clear()
+    },
+    lineOf: (v, seat) => {
+      const pos = POSITIONS[(seat - v.button + v.numPlayers) % v.numPlayers]
+      const steps = []
+      for (let i = 0; i < v.history.length; i++) {
+        const a = v.history[i]
+        if (a.street !== 'preflop' || a.seat !== seat) continue
+        steps.push([situationOf({ history: v.history.slice(0, i), seat }), a.type])
+      }
+      const key = pos + '|' + steps.map((x) => x.join(':')).join(',')
+      if (cache.has(key)) return cache.get(key)
+      let sum = 0
+      let charts = 0
+      for (const chart of seen) {
+        const x = share(chart, pos, steps)
+        if (x === null) continue
+        sum += x
+        charts++
+      }
+      const pct = charts && sum / charts >= 0.5 ? sum / charts : null
+      cache.set(key, pct)
+      return pct
+    }
+  }
+}
+
+// Point the field's reads at `hero` for as long as it sits in `hero.seat`.
+const readHero = (hero, reads) => setSeatRead(reads
+  ? (v, seat) => (seat === hero.seat ? reads.lineOf(v, seat) : null)
+  : null)
+
 // ---------------------------------------------------------------- the table
 //
 // Every random draw anybody makes goes through one stream whose state the
@@ -326,6 +400,7 @@ const makeDeal = (table, hero, pos, hand, rng, rake) => {
 
   return (override) => {
     table.stream.next = makeRng(seed)
+    hero.seat = seat
     hero.override = override
     hero.trace = override ? null : []
     const res = playHand({
@@ -399,12 +474,14 @@ const valuesOf = (c) => {
 
 // ----------------------------------------------------------------- solving
 
-const solve = ({ fieldName, perCell, passes, focus = 3, rake, seed, minN, log, units = HAND_UNITS }) => {
+const solve = ({ fieldName, perCell, passes, focus = 3, rake, seed, minN, log, units = HAND_UNITS, read = true, limp = true }) => {
   const table = makeTable(fieldName)
   const chart = new Map()
   const hero = makeHero('hero', chart, table.post, units)
   const rng = makeRng(seed)
   const rules = units.kind === 'bands'
+  const reads = read ? makeReads(units) : null
+  readHero(hero, reads)
 
   // Deal `deals` hands to each (seat, unit) pair that `want` admits, and add
   // every decision the hero meets along the way to `est`. Every sample of a
@@ -468,7 +545,7 @@ const solve = ({ fieldName, perCell, passes, focus = 3, rake, seed, minN, log, u
   // player carries, so the next pass values the rule, not a band-by-band
   // chart nobody would memorise. See fitRules.
   const project = (est) => {
-    const fitted = fitRules(est.cells, est.dealt, units, minN)
+    const fitted = fitRules(est.cells, est.dealt, units, minN, limp)
     for (const r of fitted) {
       for (let unit = 0; unit < units.count; unit++) {
         chart.set(cellKey(r.pos, r.situation, units.label(unit)),
@@ -478,7 +555,11 @@ const solve = ({ fieldName, perCell, passes, focus = 3, rake, seed, minN, log, u
     return fitted
   }
   const step = (est) => {
-    if (!rules) return update(est)
+    const note = rules ? stepRules(est) : update(est)
+    if (reads) reads.remember(chart)
+    return note
+  }
+  const stepRules = (est) => {
     const before = new Map(chart)
     const fitted = project(est)
     let changed = 0
@@ -535,6 +616,7 @@ const solve = ({ fieldName, perCell, passes, focus = 3, rake, seed, minN, log, u
   // the latest data no longer supports. In rule mode, the best rule on them.
   if (rules) {
     const fitted = project(est)
+    readHero(hero, null)
     return { chart, cells: est.cells, dealt: est.dealt, table, rules: fitted }
   }
   for (const [key, c] of est.cells) {
@@ -545,6 +627,7 @@ const solve = ({ fieldName, perCell, passes, focus = 3, rake, seed, minN, log, u
     chart.set(key, best)
   }
 
+  readHero(hero, null)
   return { chart, cells: est.cells, dealt: est.dealt, table }
 }
 
@@ -564,9 +647,19 @@ const solve = ({ fieldName, perCell, passes, focus = 3, rake, seed, minN, log, u
 // with the stretch of the ranking where the two actions it separates are
 // within two standard errors of each other: "3-bet the top 6% (anywhere from
 // 4 to 8 is noise)". That stretch is the honest precision of the rule.
+//
+// Unless `limp` is set, nobody-has-raised spots get no calling band: raise or
+// fold, the big blind's free check aside. Not because limping is always wrong
+// but because this field cannot punish it. A real table that sees a player
+// limp and re-raise starts isolating that player with hands that can stand a
+// 3-bet, or stops isolating them; the fitted field isolates every limper as
+// wide as ever, even reading the re-raise right, and folds the bottom of that
+// range to it. Every rule set solved with limping allowed found the same line
+// -- limp a third of all hands, re-raise the isolation -- and it was worth
+// +35 to +150 bb/100 over the plain TAG, which is the field and not poker.
 const RULE_ACTIONS = ['raise', 'call', 'fold']
 
-const fitRules = (cells, dealt, units, minN) => {
+const fitRules = (cells, dealt, units, minN, limp = true) => {
   const out = []
   for (const situation of SITUATIONS) {
     for (const pos of ACTING_ORDER) {
@@ -586,9 +679,10 @@ const fitRules = (cells, dealt, units, minN) => {
         for (let i = 0; i < n; i++) s.push(s[i] + rows[i].w * ev(rows[i], a))
         return s
       })
+      const passive = limp || pos === 'BB' || (situation !== 'unopened' && situation !== 'limped')
       let best = null
       for (let c1 = 0; c1 <= n; c1++) {
-        for (let c2 = c1; c2 <= n; c2++) {
+        for (let c2 = c1; c2 <= (passive ? n : c1); c2++) {
           const total = prefix[0][c1] + (prefix[1][c2] - prefix[1][c1]) + (prefix[2][n] - prefix[2][c2])
           if (!best || total > best.total + 1e-12) best = { total, c1, c2 }
         }
@@ -664,8 +758,16 @@ const fitRules = (cells, dealt, units, minN) => {
 // with the same draws, and differences them hand by hand. This is the only
 // number that says whether the chart is worth learning, so it is measured on
 // fresh deals the solver never saw.
-const validate = ({ table, chart, rake, hands, seed, units = HAND_UNITS }) => {
+const validate = ({ table, chart, rake, hands, seed, units = HAND_UNITS, read = true }) => {
   const hero = makeHero('chart', chart, table.post, units)
+  // Measured as the rules would do once the table has watched them for a
+  // while: the regulars read them at their real frequencies.
+  let reads = null
+  if (read) {
+    reads = makeReads(units)
+    reads.remember(chart)
+  }
+  readHero(hero, reads)
   const rng = makeRng(seed)
   const decks = Math.max(1, Math.floor(hands / 6))
   const acc = { chart: [], tag: [], diff: [] }
@@ -682,6 +784,7 @@ const validate = ({ table, chart, rake, hands, seed, units = HAND_UNITS }) => {
           bots.push(s === seat ? (who === 'chart' ? hero : table.post) : others[o++])
         }
         table.stream.next = makeRng(seed2 + seat)
+        hero.seat = who === 'chart' ? seat : -1
         const res = playHand({
           bots, stacks: new Array(6).fill(STACK), button: 0,
           smallBlind: BIG_BLIND / 2, bigBlind: BIG_BLIND, rake, deck
@@ -693,6 +796,7 @@ const validate = ({ table, chart, rake, hands, seed, units = HAND_UNITS }) => {
     acc.tag.push(tot.tag)
     acc.diff.push(tot.chart - tot.tag)
   }
+  readHero(hero, null)
   const stat = (xs) => {
     const m = xs.reduce((a, b) => a + b, 0) / xs.length
     const v = xs.reduce((a, b) => a + (b - m) * (b - m), 0) / (xs.length - 1)
@@ -1080,7 +1184,7 @@ const entriesOf = (chart, cells, dealt) => {
 
 module.exports = {
   makeHero, makeTable, situationOf, positionOf, raiseTo, rangeText, solve, validate, FIELDS,
-  BAND_UNITS, HAND_UNITS, chartFromRules
+  BAND_UNITS, HAND_UNITS, chartFromRules, makeReads, readHero
 }
 
 const printCheck = (check, what) => {
@@ -1093,6 +1197,10 @@ const printCheck = (check, what) => {
 }
 
 // The default: rules on bands of the ranking.
+// The bare number on the command line, not the one after --passes or --focus.
+const dealsArg = (args) =>
+  Number(args.find((a, i) => /^\d+$/.test(a) && !/^--(passes|focus|field)$/.test(args[i - 1])))
+
 const mainRules = (args, flag) => {
   const minN = 20
   const saved = fs.existsSync(RULES_FILE)
@@ -1115,23 +1223,26 @@ const mainRules = (args, flag) => {
     return
   }
 
-  const perCell = Number(args.find((a) => /^\d+$/.test(a))) || 800
+  const perCell = dealsArg(args) || 800
   const fieldName = flag('--field', 'realistic')
   const rake = args.includes('--no-rake') ? { percent: 0, cap: 0, noFlopNoDrop: true } : RAKE
   const passes = Number(flag('--passes', 3))
+  const read = !args.includes('--no-reads')
+  const limp = args.includes('--allow-limp')
 
   console.log('Solving preflop rules against the ' + fieldName + ' field (' +
     FIELDS[fieldName].join(', ') + '), ' +
-    (rake.percent ? '5% rake capped at 3bb' : 'no rake') + ', ' + units.count + ' bands of the ranking')
+    (rake.percent ? '5% rake capped at 3bb' : 'no rake') + ', ' + units.count + ' bands of the ranking' +
+    (read ? '' : ', the table never reading the hero') + (limp ? ', limping allowed' : ''))
   const started = Date.now()
   const { chart, table, rules } = solve({
     fieldName, perCell, passes, focus: Number(flag('--focus', 3)), rake, seed: 12345, minN,
-    log: console.log, units
+    log: console.log, units, read, limp
   })
   printBandKey(units)
   printBandRules(rules)
 
-  const check = validate({ table, chart, rake, hands: 120000, seed: 777, units })
+  const check = validate({ table, chart, rake, hands: 120000, seed: 777, units, read })
   printCheck(check, 'rules')
 
   // Read again before writing: the fields are independent solves, and running
@@ -1143,7 +1254,7 @@ const mainRules = (args, flag) => {
   saved.bands = units.members.map((m, b) => ({ upTo: units.upTo[b], hands: m.map(handLabel) }))
   saved.fields[fieldName] = {
     generated: new Date().toISOString(),
-    perCell, passes, rake: rake.percent > 0 ? rake : null,
+    perCell, passes, rake: rake.percent > 0 ? rake : null, read, limp,
     validation: check,
     rules
   }
@@ -1179,7 +1290,7 @@ if (require.main === module) {
     process.exit(0)
   }
 
-  const perCell = Number(args.find((a) => /^\d+$/.test(a))) || 100
+  const perCell = dealsArg(args) || 100
   const fieldName = flag('--field', 'realistic')
   const rake = args.includes('--no-rake') ? { percent: 0, cap: 0, noFlopNoDrop: true } : RAKE
   const passes = Number(flag('--passes', 3))
