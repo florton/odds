@@ -49,7 +49,7 @@ node blackjack.js basic.json 6 0.75 count   # count a 6-deck shoe cut at 75%
 
 node texas.js                      # deal and print one Hold'em hand
 node texas.js --watch 5            # watch 5 hands dealt to the fitted personalities
-node texas-play.js                 # sit down and play them yourself (--field tough|soft, --fast, --no-coach)
+node texas-play.js                 # sit down and play them yourself, types hidden (--field tough|soft, --slow, --no-coach)
 node texas.js --test               # engine invariant checks
 node texas-eval.js --enumerate     # verify the evaluator on all 133M seven-card hands
 node texas-calibrate.js --check    # how well the players match real statistics

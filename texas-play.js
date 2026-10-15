@@ -1,11 +1,11 @@
 // Texas Hold'em -- sit down at the table yourself.
 //
 //   node texas-play.js                  you against the realistic field
-//   node texas-play.js --field tough    nit, two TAGs, two LAGs: the regulars' game
-//   node texas-play.js --field soft     two stations and a maniac: the fun game
+//   node texas-play.js --field tough    nit, two TAGs, a LAG and one fish
+//   node texas-play.js --field soft     three fish, a TAG and a nit
 //   node texas-play.js --seed 7         replay a session (same deals while you play the same way)
-//   node texas-play.js --fast           no pause between the bots' actions
-//   node texas-play.js --no-coach       hide the equity / pot-odds / coach lines
+//   node texas-play.js --slow           pause between the bots' actions (--pace <ms> to pick)
+//   node texas-play.js --no-coach       hide the equity / pot-odds / textbook lines
 //   node texas-play.js --ascii          s h d c instead of suit symbols
 //   node texas-play.js --no-color
 //
@@ -13,13 +13,15 @@
 // You are seat 0 in texas-engine.js like any other bot: your `act` just reads
 // the keyboard instead of a model. The five opponents are the fitted
 // personalities from texas-players.js, each at the proficiency it was fitted
-// at, so the table plays the way the measured population does.
+// at, so the table plays the way the measured population does. Every field
+// has at least one fish (a station or a maniac) in it.
 //
 // The narration is rebuilt from the hand's public history -- the same record
 // the bots decide from -- so nothing printed here is information a player at
-// a real table would not have. The exception is the opponent types, which are
-// shown because at a real table you would have a read on them after an orbit
-// or two (pass --blind to play without them).
+// a real table would not have. That includes the opponents' types: seats,
+// names and the equity estimate are all type-blind, and the only read you get
+// is the one you build yourself (p shows the VPIP / PFR you have seen). The
+// types are revealed when you leave.
 
 const fs = require('fs')
 const { playHand, makeRng, makeDeck, shuffle } = require('./texas-engine')
@@ -40,9 +42,9 @@ const option = (name, dflt) => {
   return i >= 0 && i + 1 < args.length ? args[i + 1] : dflt
 }
 
-const FAST = flag('--fast')
+// No pause by default; --fast is still accepted from the old default.
+const PACE = Math.max(0, Number(option('--pace', flag('--slow') ? 450 : 0)) || 0)
 const COACH = !flag('--no-coach')
-const BLIND = flag('--blind')
 const ASCII = flag('--ascii')
 const COLOR = process.stdout.isTTY && !process.env.NO_COLOR && !flag('--no-color')
 const SEED = Number(option('--seed', Date.now() >>> 0)) >>> 0
@@ -57,49 +59,17 @@ const HERO = 0
 
 const FIELDS = {
   realistic: ['nit', 'tag', 'lag', 'station', 'maniac'],
-  tough: ['nit', 'tag', 'tag', 'lag', 'lag'],
+  tough: ['nit', 'tag', 'tag', 'lag', 'station'],
   soft: ['station', 'maniac', 'station', 'tag', 'nit']
 }
 
-const NAMES = {
-  nit: ['Nina', 'Ned'],
-  tag: ['Theo', 'Tess'],
-  lag: ['Lars', 'Lucy'],
-  station: ['Stan', 'Sally'],
-  maniac: ['Max', 'Mia']
+const TYPE_LABEL = {
+  nit: 'Nit', tag: 'TAG', lag: 'LAG', station: 'Calling station (fish)', maniac: 'Maniac (fish)'
 }
 
-const TYPES = {
-  nit: {
-    label: 'Nit',
-    blurb: 'Plays only premium hands and almost never bluffs. When a nit raises, ' +
-      'believe it. Steal their blinds freely, and fold to their big bets.'
-  },
-  tag: {
-    label: 'TAG',
-    blurb: 'Tight-aggressive regular. Plays a solid range and bets it hard. ' +
-      'The best player at the table -- avoid big pots without a big hand.'
-  },
-  lag: {
-    label: 'LAG',
-    blurb: 'Loose-aggressive. Plays lots of hands and keeps the pressure on; ' +
-      'a bet from a LAG does not always mean strength.'
-  },
-  station: {
-    label: 'Station',
-    blurb: 'Calling station. Calls far too much and rarely raises. Do not bluff ' +
-      'this one -- bet your good hands, and bet them bigger.'
-  },
-  maniac: {
-    label: 'Maniac',
-    blurb: 'Raises and bets with almost anything. Expect chaos: call down lighter ' +
-      'and let them bluff into you.'
-  }
-}
-
-// How much wider than a population player each type plays a given line. Used
-// only for the hero's equity estimate -- the bots themselves never see it.
-const RANGE_WIDTH = { nit: 0.6, tag: 1, lag: 1.4, station: 2.2, maniac: 2.8 }
+// Names carry no hint of the type: they are shuffled onto shuffled seats.
+const NAME_POOL = ['Alex', 'Blake', 'Casey', 'Drew', 'Emery', 'Finn', 'Gray', 'Harper',
+  'Jordan', 'Kai', 'Logan', 'Morgan', 'Quinn', 'Reese', 'Sam', 'Toby']
 
 if (!FIELDS[FIELD]) {
   console.log('Unknown field "' + FIELD + '" -- choose one of: ' + Object.keys(FIELDS).join(', '))
@@ -195,20 +165,7 @@ const ask = (prompt) => {
 // ------------------------------------------------------------------ positions
 
 const POSITIONS = ['BTN', 'SB', 'BB', 'UTG', 'HJ', 'CO']
-const POSITION_BLURB = {
-  BTN: 'the button. You act last on every street after the flop -- the best seat ' +
-    'at the table, where you can play the most hands.',
-  SB: 'the small blind, 1 chip already in. You will act first on every street ' +
-    'after the flop, the hardest seat to win from.',
-  BB: 'the big blind, 2 chips already in. You act last before the flop and often ' +
-    'see it cheaply, but first-ish after it.',
-  UTG: '"under the gun": first to act before the flop with five players behind ' +
-    'you. Play tight here.',
-  HJ: 'the hijack, middle position. Four players behind; a little looser than UTG.',
-  CO: 'the cutoff, one seat before the button. A good seat to raise and steal ' +
-    'the blinds from.'
-}
-// Roughly how wide a solid player opens from each seat, in percent of hands.
+// Standard six-max opening ranges, in percent of hands, for a first-in raise.
 const OPEN_WIDTH = { UTG: 15, HJ: 19, CO: 27, BTN: 45, SB: 38, BB: 0 }
 
 const positionOf = (seat, button, n) => POSITIONS[(seat - button + n) % n]
@@ -218,42 +175,10 @@ const positionOf = (seat, button, n) => POSITIONS[(seat - button + n) % n]
 const handName = (idx) => {
   const a = Math.floor(idx / 13)
   const b = idx % 13
-  if (a === b) return 'a pair of ' + RANK_PLURAL[a]
+  if (a === b) return 'pair of ' + RANK_PLURAL[a]
   const hi = a > b ? a : b
   const lo = a > b ? b : a
   return RANK_NAME[hi] + '-' + RANK_NAME[lo] + (a > b ? ' suited' : ' offsuit')
-}
-
-const NICKNAMES = {
-  AA: 'pocket rockets', KK: 'cowboys', QQ: 'ladies', JJ: 'fishhooks',
-  AKs: 'big slick', AKo: 'big slick', '72o': 'the worst hand in poker'
-}
-
-// A one-line sense of what kind of starting hand this is.
-const handClass = (idx) => {
-  const a = Math.floor(idx / 13)
-  const b = idx % 13
-  const hi = Math.max(a, b)
-  const lo = Math.min(a, b)
-  const suited = a > b
-  const rank = handRank(idx, 1)
-  if (a === b) {
-    if (hi >= 10) return 'a premium pair -- raise it'
-    if (hi >= 7) return 'a strong pair, usually worth a raise'
-    if (hi >= 4) return 'a middle pair: often good, sometimes in trouble against overcards'
-    return 'a small pair: mostly hoping to flop a set (about 1 time in 8.5)'
-  }
-  if (hi === 12 && lo >= 11) return 'a premium hand -- raise it'
-  if (hi === 12 && lo >= 9) return 'a big ace, strong in most spots'
-  if (hi === 12 && suited) return 'a suited ace: can make the nut flush'
-  if (hi === 12) return 'a weak ace -- dominated by better aces, careful'
-  if (lo >= 8) return 'two broadway cards, good for top pair'
-  if (suited && hi - lo === 1 && lo >= 3) return 'a suited connector: makes straights and flushes, likes cheap flops'
-  if (suited && hi - lo === 2 && lo >= 3) return 'a suited one-gapper: speculative'
-  if (suited && hi >= 10) return 'a suited high card, playable in late position'
-  if (rank > 70) return 'trash -- most players fold this'
-  if (rank > 50) return 'a weak hand, playable only cheaply or from late position'
-  return 'a marginal hand, fine in late position'
 }
 
 const strHigh = (mask) => {
@@ -268,7 +193,8 @@ const rankMask = (cs) => cs.reduce((m, c) => {
   return m | (1 << (r + 1)) | (r === 12 ? 1 : 0)
 }, 0)
 
-// What the hero's hand is right now, in words, plus whatever it is drawing to.
+// What the hero's hand is right now, plus whatever it is drawing to. Names
+// only -- how much the hand is worth is the equity line's job.
 const readHand = (hole, board) => {
   const all = hole.concat(board)
   const sc = evaluate(all)
@@ -285,49 +211,39 @@ const readHand = (hole, board) => {
   let made
 
   if (sc === boardScore) {
-    made = 'nothing beyond the board itself -- every player still in shares it ' +
-      '(a chop at best)'
+    made = 'the board plays (a split at best)'
   } else if (cat === 0) {
-    made = RANK_NAME[r1] + ' high -- no pair yet'
+    made = RANK_NAME[r1] + ' high'
   } else if (cat === PAIR) {
     if (pocket && r1 === h0) {
-      made = r1 > distinct[0]
-        ? 'an overpair, ' + RANK_PLURAL[r1] + ' -- bigger than every card on the board. Strong'
-        : 'pocket ' + RANK_PLURAL[r1] + ' with higher cards on the board (an underpair). ' +
-          'Beaten by anyone holding one of those'
+      made = r1 > distinct[0] ? 'overpair, ' + RANK_PLURAL[r1] : 'underpair, ' + RANK_PLURAL[r1]
     } else if (onBoard(r1) === 2) {
-      const kick = Math.max(h0, h1)
-      made = 'only the board\'s pair of ' + RANK_PLURAL[r1] + ' -- you really have ' +
-        RANK_NAME[kick] + ' high'
+      made = 'the board\'s pair of ' + RANK_PLURAL[r1] + ', ' + RANK_NAME[Math.max(h0, h1)] + ' kicker'
     } else {
       const where = distinct.indexOf(r1)
       const kicker = h0 === r1 ? h1 : h0
-      const which = where === 0 ? 'top pair' : where === 1 ? 'second pair' : 'bottom pair'
-      const strength = where === 0
-        ? (kicker >= 10 ? ' -- a good hand' : ' -- decent, but a better kicker beats you')
-        : where === 1 ? ' -- a medium hand, vulnerable' : ' -- weak'
-      made = which + ', ' + RANK_PLURAL[r1] + ', with a ' + RANK_NAME[kicker] + ' kicker' + strength
+      const which = where === 0 ? 'top pair' : where === 1 ? 'second pair'
+        : where === distinct.length - 1 ? 'bottom pair' : 'third pair'
+      made = which + ', ' + RANK_PLURAL[r1] + ', ' + RANK_NAME[kicker] + ' kicker'
     }
   } else if (cat === TWO_PAIR) {
     const boardPaired = distinct.length < boardRanks.length
     made = 'two pair, ' + RANK_PLURAL[r1] + ' and ' + RANK_PLURAL[r2] +
-      (boardPaired
-        ? ' -- but one pair is on the board for everyone, so it is weaker than it sounds'
-        : ' -- strong')
+      (boardPaired ? ' (one pair is on the board)' : '')
   } else if (cat === TRIPS) {
-    if (pocket) made = 'a set of ' + RANK_PLURAL[r1] + ' (your pocket pair plus one on the board) -- very strong, and well hidden'
-    else if (onBoard(r1) === 3) made = 'three ' + RANK_PLURAL[r1] + ' on the board -- everyone shares them; your kicker decides'
-    else made = 'trips, ' + RANK_PLURAL[r1] + ' (one in your hand, two on the board) -- strong, but watch your kicker'
+    if (pocket) made = 'set of ' + RANK_PLURAL[r1]
+    else if (onBoard(r1) === 3) made = 'trip ' + RANK_PLURAL[r1] + ' on the board (kickers play)'
+    else made = 'trips, ' + RANK_PLURAL[r1]
   } else if (cat === STRAIGHT) {
-    made = 'a straight, ' + RANK_NAME[r1] + ' high -- very strong'
+    made = 'straight, ' + RANK_NAME[r1] + ' high'
   } else if (cat === FLUSH) {
-    made = 'a flush, ' + RANK_NAME[r1] + ' high' + (r1 === 12 ? ' -- the nut flush' : ' -- very strong unless a bigger flush is out there')
+    made = r1 === 12 ? 'nut flush' : 'flush, ' + RANK_NAME[r1] + ' high'
   } else if (cat === FULL_HOUSE) {
-    made = 'a full house, ' + RANK_PLURAL[r1] + ' full of ' + RANK_PLURAL[r2] + ' -- a monster'
+    made = 'full house, ' + RANK_PLURAL[r1] + ' full of ' + RANK_PLURAL[r2]
   } else if (cat === QUADS) {
-    made = 'four of a kind, ' + RANK_PLURAL[r1] + '! -- a monster'
+    made = 'four ' + RANK_PLURAL[r1]
   } else {
-    made = r1 === 12 ? 'a ROYAL FLUSH!' : 'a straight flush, ' + RANK_NAME[r1] + ' high!'
+    made = r1 === 12 ? 'royal flush' : 'straight flush, ' + RANK_NAME[r1] + ' high'
   }
 
   const draws = []
@@ -337,10 +253,8 @@ const readHand = (hole, board) => {
         const mine = hole.filter((c) => (c & 3) === suit).length
         if (mine === 0) continue
         const n = all.filter((c) => (c & 3) === suit).length
-        if (n === 4) draws.push('a flush draw (9 cards complete it)')
-        else if (n === 3 && board.length === 3 && mine === 2) {
-          draws.push('a backdoor flush draw (needs both turn and river)')
-        }
+        if (n === 4) draws.push('flush draw (9 cards)')
+        else if (n === 3 && board.length === 3 && mine === 2) draws.push('backdoor flush draw')
       }
     }
     if (cat < STRAIGHT) {
@@ -352,8 +266,8 @@ const readHand = (hole, board) => {
         if (have & (1 << (r + 1))) continue
         if (strHigh(have | bit) >= 0 && strHigh(boardOnly | bit) < 0) completing++
       }
-      if (completing >= 2) draws.push('an open-ended straight draw (8 cards complete it)')
-      else if (completing === 1) draws.push('a gutshot straight draw (4 cards complete it)')
+      if (completing >= 2) draws.push('open-ended straight draw (8 cards)')
+      else if (completing === 1) draws.push('gutshot (4 cards)')
     }
   }
   const outs = board.length < 5 ? countOuts(hole, board) : 0
@@ -365,15 +279,10 @@ const describeBoard = (board) => {
   const suits = [0, 0, 0, 0]
   for (const c of board) suits[c & 3]++
   const most = Math.max(...suits)
-  if (board.length === 3) {
-    if (most === 3) notes.push('monotone: all one suit, a flush is possible already')
-    else if (most === 2) notes.push('two-tone: flush draws are out there')
-    else notes.push('rainbow: no flush draws')
-  } else if (most >= 3) {
-    notes.push(most + ' of one suit: flushes are possible')
-  }
+  if (board.length === 3) notes.push(most === 3 ? 'monotone' : most === 2 ? 'two-tone' : 'rainbow')
+  else if (most >= 3) notes.push(most + ' to a flush')
   const ranks = board.map((c) => c >> 2)
-  if (new Set(ranks).size < ranks.length) notes.push('paired board: full houses and trips are possible')
+  if (new Set(ranks).size < ranks.length) notes.push('paired')
   const mask = rankMask(board)
   let connected = false
   for (let low = 0; low <= 9; low++) {
@@ -381,18 +290,17 @@ const describeBoard = (board) => {
     for (let k = 0; k < 5; k++) if (mask & (1 << (low + k))) n++
     if (n >= 3) connected = true
   }
-  if (connected) notes.push('connected: straights are possible')
-  if (notes.length === 1 && board.length === 3 && most === 1) notes[0] = 'rainbow and disconnected: a dry board'
-  return notes.join('; ')
+  if (connected) notes.push('straight possible')
+  return notes.join(', ')
 }
 
 // ------------------------------------------------------------------ equity
 //
 // A Monte Carlo of the hero's hand against a guessed range for every live
-// opponent. The guess comes off their preflop line -- the same population
-// read the bots use (PARAMS.rangeOpen and friends) -- widened or narrowed by
-// what type of player they are. It does not narrow for postflop bets, and the
-// coach line says so.
+// opponent. The guess comes off their preflop line only -- the same population
+// read the bots use (PARAMS.rangeOpen and friends) -- and is the same for
+// every opponent, since you do not know who is who. It does not narrow for
+// postflop bets.
 
 const COMBOS = (() => {
   const out = []
@@ -415,7 +323,7 @@ const sampleHand = (widthPct, dead) => {
   return null
 }
 
-const opponentRanges = (v, kinds) => {
+const opponentRanges = (v) => {
   let raises = 0
   let bet = v.bigBlind
   let lastRaise = 100
@@ -446,8 +354,7 @@ const opponentRanges = (v, kinds) => {
     if (s === v.seat || !v.inHand[s] || v.folded[s]) continue
     if (entered && width[s] === undefined) continue
     const base = width[s] === undefined ? 100 : width[s]
-    const scaled = base * (RANGE_WIDTH[kinds[s]] || 1)
-    out.push({ seat: s, width: Math.max(1.5, Math.min(100, scaled)) })
+    out.push({ seat: s, width: Math.max(1.5, Math.min(100, base)) })
   }
   return out
 }
@@ -493,13 +400,11 @@ const equityVs = (hole, board, ranges, trials = 3000) => {
 // ------------------------------------------------------------------ session state
 
 const rng = makeRng(SEED)
-const lineup = FIELDS[FIELD]
-const used = {}
+// Seating gets its own stream so the deals for a seed do not depend on it.
+const seatRng = makeRng((SEED ^ 0x9e3779b9) >>> 0)
+const lineup = shuffle(FIELDS[FIELD].slice(), seatRng)
 const kinds = ['hero'].concat(lineup)
-const names = ['You'].concat(lineup.map((k) => {
-  used[k] = (used[k] || 0) + 1
-  return NAMES[k][used[k] - 1] || k + used[k]
-}))
+const names = ['You'].concat(shuffle(NAME_POOL.slice(), seatRng).slice(0, lineup.length))
 const models = lineup.map((k, i) => archetype(k, fieldSkill(k), rng, names[i + 1]))
 
 const stacks = new Array(6).fill(BUY_IN)
@@ -514,27 +419,25 @@ const session = {
   biggestPot: 0,
   quit: false
 }
+// What you have seen each opponent do: the HUD a player keeps in their head.
+const seen = names.map(() => ({ hands: 0, vpip: 0, pfr: 0, showdowns: 0 }))
 
-const typeTag = (s) => {
-  if (s === HERO) return ''
-  return BLIND ? '' : ' ' + dim('(' + TYPES[kinds[s]].label + ')')
-}
-const who = (s, hand) => {
-  const pos = hand ? dim(positionOf(s, hand.button, 6)) : ''
+const who = (s, h) => {
+  const pos = h ? dim(positionOf(s, h.button, 6)) : ''
   const name = s === HERO ? green(bold('You')) : cyan(names[s])
-  return name + typeTag(s) + (pos ? ' ' + pos : '')
+  return name + (pos ? ' ' + pos : '')
 }
 
 // ------------------------------------------------------------------ narration
 //
 // Rebuilt from `history` each time any seat is asked to act, so actions print
-// in order as they happen, with a pause between bot actions while you are
-// still in the hand.
+// in order as they happen. Once you fold, the rest of the hand is collected
+// into a one-line summary instead.
 
 let hand = null
 const glossed = new Set()
 const gloss = (term, text) => {
-  if (glossed.has(term)) return ''
+  if (glossed.has(term) || hand.heroFolded) return ''
   glossed.add(term)
   return dim(' (' + text + ')')
 }
@@ -545,17 +448,19 @@ const boardFor = (street, board) =>
 
 const streetHeader = (street, board, note) => {
   const shown = boardFor(street, board)
+  if (hand.heroFolded) {
+    hand.rest.push(dim(STREET_LABEL[street]) + ' ' + cards(street === 'flop' ? shown : shown.slice(-1)))
+    return
+  }
   const fresh = street === 'flop' ? shown : shown.slice(-1)
   const old = street === 'flop' ? [] : shown.slice(0, -1)
-  say('')
-  say(yellow(bold('--- ' + STREET_LABEL[street] + ' ---')) + '   ' +
-    (old.length ? cards(old) + '  ' : '') + cards(fresh) +
-    '        pot ' + bold(hand.pot) + (note ? '  ' + dim(note) : ''))
   const texture = describeBoard(shown)
-  if (texture) say('    ' + dim(texture))
-  if (!hand.heroFolded) {
+  say(yellow(bold(STREET_LABEL[street])) + '  ' + (old.length ? cards(old) + '  ' : '') + cards(fresh) +
+    '   pot ' + bold(hand.pot) + (texture ? dim('   ' + texture) : '') + (note ? '  ' + dim(note) : ''))
+  // Nobody is left to bet, so there is no decision block to show the hand in.
+  if (note !== undefined) {
     const read = readHand(hand.hole, shown)
-    say('    ' + dim('You have ') + read.made + (read.draws.length ? dim(', plus ') + read.draws.join(' and ') : ''))
+    say('  ' + dim('you: ') + read.made + (read.draws.length ? dim(' + ') + read.draws.join(', ') : ''))
   }
 }
 
@@ -570,97 +475,107 @@ const describeAction = (a) => {
   if (a.type === 'call') {
     if (a.street === 'preflop' && st.raises === 0) {
       if (a.toCall === BIG_BLIND / 2 && a.amount === BIG_BLIND / 2 && positionOf(a.seat, hand.button, 6) === 'SB') {
-        return 'completes the small blind to ' + a.to + gloss('limp', 'calling just the big blind rather than raising is a "limp"')
+        return 'completes to ' + a.to + gloss('limp', 'calling the big blind without raising is a "limp"')
       }
-      return 'limps in for ' + a.to + gloss('limp', 'calling just the big blind rather than raising -- usually a weak or passive play')
+      return 'limps for ' + a.to + gloss('limp', 'calling the big blind without raising')
     }
-    const frac = a.potBefore > 0 ? a.amount / (a.potBefore + a.amount) : 0
-    return 'calls ' + a.amount + allIn +
-      (frac > 0 && a.street !== 'preflop' ? dim('  (paying ' + pct(frac) + ' of the new pot)') : '')
+    return 'calls ' + a.amount + allIn
   }
   // A raise (or a bet, when nothing was owed).
   let text
   if (a.street === 'preflop') {
-    const label = st.raises === 0 ? (st.limpers > 0 ? 'raises over the limp' + (st.limpers > 1 ? 's' : '') + ' to ' : 'opens with a raise to ')
+    const label = st.raises === 0 ? (st.limpers > 0 ? 'raises over the limp' + (st.limpers > 1 ? 's' : '') + ' to ' : 'opens to ')
       : st.raises === 1 ? '3-bets to ' : st.raises === 2 ? '4-bets to ' : (st.raises + 2) + '-bets to '
     text = label + a.to + dim(' (' + bb(a.to) + ')')
-    if (st.raises === 1) text += gloss('3bet', 're-raise of an open -- shows a strong range, or a bluff')
-    if (st.raises === 2) text += gloss('4bet', 'a re-raise of a 3-bet -- usually very strong')
+    if (st.raises === 1) text += gloss('3bet', 'the re-raise of an open')
+    if (st.raises === 2) text += gloss('4bet', 'the re-raise of a 3-bet')
     hand.preflopRaiser = a.seat
   } else if (a.toCall === 0 && st.raises === 0) {
     const size = a.potBefore > 0 ? a.amount / a.potBefore : 1
-    text = 'bets ' + a.amount + dim(' into ' + a.potBefore + ' (' + pct(size) + ' pot)')
+    text = 'bets ' + a.amount + dim(' (' + pct(size) + ' pot)')
     if (a.street === 'flop' && a.seat === hand.preflopRaiser) {
-      text += gloss('cbet', 'a "continuation bet": the preflop raiser keeps betting')
+      text += gloss('cbet', 'a continuation bet: the preflop raiser bets the flop')
     }
   } else {
     const check = st.checked.has(a.seat)
     text = (check ? 'check-raises to ' : st.raises >= 2 ? 're-raises to ' : 'raises to ') + a.to
-    if (check) text += gloss('checkraise', 'checking, then raising a bet -- a strong move')
+    if (check) text += gloss('checkraise', 'a check, then a raise after someone bets')
   }
   st.raises++
   return text + allIn
 }
 
+const newStreet = (street, board) => {
+  hand.street = street
+  hand.streetState = { raises: 0, limpers: 0, checked: new Set() }
+  if (street !== 'preflop') streetHeader(street, board)
+}
+
 const flush = (history, board, view) => {
   while (hand.printed < history.length) {
     const a = history[hand.printed]
-    if (a.street !== hand.street) {
-      hand.street = a.street
-      hand.streetState = { raises: 0, limpers: 0, checked: new Set() }
-      if (a.street !== 'preflop') streetHeader(a.street, board)
-    }
-    if (a.seat !== HERO) sleep(FAST ? 0 : hand.heroFolded ? 120 : 550)
+    if (a.street !== hand.street) newStreet(a.street, board)
+    if (a.seat !== HERO && !hand.heroFolded) sleep(PACE)
     const text = describeAction(a)
     if (a.street === 'preflop' && a.type === 'call' && hand.streetState.raises === 0) hand.streetState.limpers++
     hand.pot = a.potBefore + a.amount
+    if (hand.heroFolded) {
+      hand.rest.push(names[a.seat] + ' ' + text.replace(/ \(.*?\)/g, ''))
+    } else {
+      say('  ' + who(a.seat, hand) + ' ' + (a.seat === HERO ? text.replace(/^(\S+?)s\b/, '$1') : text))
+    }
     if (a.seat === HERO && a.type === 'fold') hand.heroFolded = true
-    say('  ' + who(a.seat, hand) + ' ' + (a.seat === HERO ? text.replace(/^(\S+?)s\b/, '$1') : text))
     hand.printed++
   }
   // The first actor on a new street: the header goes up before they decide.
-  if (view && view.street !== hand.street) {
-    hand.street = view.street
-    hand.streetState = { raises: 0, limpers: 0, checked: new Set() }
-    streetHeader(view.street, board)
-  }
+  if (view && view.street !== hand.street) newStreet(view.street, board)
 }
 
 // ------------------------------------------------------------------ the hero
 
 const HELP = [
   '',
-  bold('How to play'),
-  '  f          fold (give up the hand)',
-  '  c  or  k   call the bet, or check when there is nothing to call',
-  '  1 2 3 ...  pick one of the listed bet / raise sizes',
-  '  r 40       raise (or bet) to exactly 40 -- the total you will have in this street',
+  bold('Keys'),
+  '  f          fold',
+  '  c  or  k   call, or check when there is nothing to call',
+  '  1 2 3 ...  one of the listed bet / raise sizes',
+  '  r 40       raise (or bet) to exactly 40 -- your total for this street',
   '  a          all in',
-  '  t          show the table      p  the players     s  your session stats',
-  '  q          fold and leave the table',
+  '  t  table   p  players (what you have seen them do)   s  session stats   q  leave',
   '',
-  bold('Reading the screen'),
-  '  pot        every chip in the middle, including bets made on this street',
-  '  equity     how often your hand wins if everyone checks it down from here,',
-  '             simulated against the hands each opponent is likely to hold',
-  '  pot odds   the share of the final pot you are paying to call. If your',
-  '             equity is higher than that, calling makes money in the long run',
-  '  outs       cards still in the deck that improve you to a likely winner.',
-  '             Rule of 4 and 2: outs x 4 with two cards to come, x 2 with one',
-  '  bb         big blinds. 200 chips = 100 bb; win rates are quoted in bb/100 hands',
-  '  T          is a ten:  T' + SUIT_GLYPH[0] + ' = ten of spades',
+  bold('Numbers'),
+  '  pot        every chip in the middle, this street\'s bets included',
+  '  equity     how often your hand wins at showdown, simulated against a range',
+  '             for each opponent guessed from their preflop action only. Bets',
+  '             after the flop are not counted, so it runs high against them',
+  '  pot odds   the share of the final pot you pay to call: call when your',
+  '             equity is above it',
+  '  outs       cards that improve you. Rule of 4 and 2: outs x 4 with two cards',
+  '             to come, x 2 with one',
+  '  VPIP/PFR   how often a player puts money in / raises before the flop',
+  '  bb         big blinds. 200 chips = 100 bb; win rates are bb per 100 hands',
+  '  T          a ten:  T' + SUIT_GLYPH[0] + ' = ten of spades',
+  '',
+  bold('Textbook line'),
+  '  Preflop: raise first in with the standard opening range for your seat',
+  '  (UTG 15%, HJ 19%, CO 27%, BTN 45%, SB 38%), never limp; over limpers raise',
+  '  a range 60% as wide. Re-raise for value with JJ+ and AK, 4-bet QQ+ and AK,',
+  '  5-bet AA and KK. Otherwise call a raise when equity beats the pot odds.',
+  '  Postflop: bet or raise for value at 60% / 70% equity, c-bet the flop',
+  '  heads-up as the preflop raiser, otherwise call when equity beats the pot',
+  '  odds and fold when it does not.',
   ''
 ].join('\n')
 
 const showPlayers = () => {
   say('')
-  say(bold('The table'))
+  say(bold('What you have seen') + dim('   VPIP / PFR over the hands they were dealt'))
   for (let s = 1; s < 6; s++) {
-    const t = TYPES[kinds[s]]
-    say('  ' + cyan(names[s].padEnd(6)) + (BLIND ? '' : bold(t.label.padEnd(8)) + t.blurb))
+    const p = seen[s]
+    const stat = p.hands ? pct(p.vpip / p.hands).padStart(4) + ' / ' + pct(p.pfr / p.hands).padEnd(4) : '  -- / --  '
+    say('  ' + cyan(names[s].padEnd(8)) + stat + dim('   ' + p.hands + ' hands, ' + p.showdowns + ' shown down'))
   }
-  if (BLIND) say(dim('  (playing --blind: work out who is who yourself)'))
-  say('')
+  say(dim('  Under ~30 hands these numbers are mostly noise.'))
 }
 
 const showTable = (v, button) => {
@@ -674,13 +589,10 @@ const showTable = (v, button) => {
       else if (v.folded[s]) status = dim('folded')
       else if (v.allIn[s]) status = red('all in') + (v.committed[s] ? dim(' (' + v.committed[s] + ' this street)') : '')
       else if (v.committed[s]) status = 'in for ' + v.committed[s] + ' this street'
-    } else if (pos === 'SB' || pos === 'BB') {
-      status = dim('posts ' + (pos === 'SB' ? SMALL_BLIND : BIG_BLIND))
     }
     const name = s === HERO ? 'You' : names[s]
-    const tag = s === HERO || BLIND ? '' : TYPES[kinds[s]].label
-    say('  ' + dim(pos.padEnd(4)) + (s === HERO ? green(bold(name.padEnd(7))) : cyan(name.padEnd(7))) +
-      dim(tag.padEnd(9)) + String(v ? v.stacks[s] : stacks[s]).padStart(5) + '   ' + status)
+    say('  ' + dim(pos.padEnd(4)) + (s === HERO ? green(bold(name.padEnd(8))) : cyan(name.padEnd(8))) +
+      String(v ? v.stacks[s] : stacks[s]).padStart(5) + '   ' + status)
   }
 }
 
@@ -695,94 +607,139 @@ const showStats = () => {
   if (s.buyIns > 1) say('  buy-ins        ' + s.buyIns)
   if (s.hands) {
     say('  VPIP / PFR     ' + pct(s.vpip / s.hands) + ' / ' + pct(s.pfr / s.hands) +
-      dim('   (hands you put money in / raised before the flop -- a solid regular runs about 22 / 18)'))
+      dim('   (a standard six-max range is about 22 / 18)'))
   }
   if (s.showdowns) say('  showdowns won  ' + s.showdownsWon + ' of ' + s.showdowns)
   if (s.biggestPot) say('  biggest pot    ' + s.biggestPot)
-  say(dim('  A few hundred hands is noise: even a winning player swings 20+ bb/100 over that many.'))
+  say(dim('  Over a few hundred hands, results swing 20+ bb/100 either way.'))
 }
 
 // The bet / raise sizes worth offering in this spot, as "raise to" totals.
+// `id` is what the textbook line refers to.
 const sizeOptions = (v) => {
   const opts = []
   if (!v.canRaise) return opts
   const curBet = Math.max(...v.committed)
   const pot = v.pot
   const preflop = v.street === 'preflop'
-  const add = (to, label) => {
+  const add = (to, label, id) => {
     to = Math.round(to)
     if (to < v.minRaiseTo) to = v.minRaiseTo
     if (to >= v.maxRaiseTo) return
-    if (opts.some((o) => o.to === to)) return
-    opts.push({ to, label })
+    const same = opts.find((o) => o.to === to)
+    if (same) {
+      if (id && !same.id) same.id = id
+      return
+    }
+    opts.push({ to, label, id })
   }
   if (preflop && curBet <= v.bigBlind) {
     const limpers = v.history.filter((a) => a.street === 'preflop' && a.type === 'call').length
     const extra = limpers * v.bigBlind
-    add(2.5 * v.bigBlind + extra, '2.5x' + (limpers ? ' + 1 bb per limper' : '') + ', a small open')
-    add(3 * v.bigBlind + extra, '3x' + (limpers ? ' + 1 bb per limper' : '') + ', the standard open')
-    add(4 * v.bigBlind + extra, '4x' + (limpers ? ' + 1 bb per limper' : '') + ', a big open')
+    const plus = limpers ? '+' + limpers : ''
+    add(2.5 * v.bigBlind + extra, '2.5x' + plus)
+    add(3 * v.bigBlind + extra, '3x' + plus, 'open')
+    add(4 * v.bigBlind + extra, '4x' + plus)
   } else if (preflop) {
-    add(3 * curBet, '3x their raise, a standard re-raise in position')
-    add(4 * curBet, '4x their raise, standard out of position')
-    add(curBet + pot + v.toCall, 'a pot-sized raise')
+    const raises = v.history.filter((a) => a.street === 'preflop' && a.type === 'raise').length
+    if (raises >= 2) add(2.3 * curBet, '2.3x', 'reraise')
+    add(3 * curBet, '3x', raises === 1 ? 'ip' : undefined)
+    add(4 * curBet, '4x', raises === 1 ? 'oop' : undefined)
+    add(curBet + pot + v.toCall, 'pot')
   } else if (curBet === 0) {
-    add(pot / 3, 'one third of the pot -- cheap, for thin value or a probe')
-    add(pot / 2, 'half the pot')
-    add(pot * 2 / 3, 'two thirds of the pot -- the standard size')
-    add(pot, 'the full pot -- for big hands and big draws')
+    add(pot / 3, '1/3 pot')
+    add(pot / 2, '1/2 pot', 'cbet')
+    add(pot * 2 / 3, '2/3 pot', 'value')
+    add(pot, 'pot')
   } else {
-    add(v.minRaiseTo, 'the minimum raise')
-    add(curBet + (pot + v.toCall) * 0.66, 'a two-thirds-pot raise')
-    add(curBet + pot + v.toCall, 'a pot-sized raise')
+    add(v.minRaiseTo, 'min')
+    add(curBet + (pot + v.toCall) * 0.66, '2/3 pot', 'value')
+    add(curBet + pot + v.toCall, 'pot')
   }
   opts.sort((x, y) => x.to - y.to)
   // A minimum raise is worth offering against a bet; a 2-chip lead into a
   // big pot is not.
   if (curBet > 0 && opts.length && opts[0].to !== v.minRaiseTo && v.minRaiseTo < v.maxRaiseTo) {
-    opts.unshift({ to: v.minRaiseTo, label: 'the minimum' })
+    opts.unshift({ to: v.minRaiseTo, label: 'min' })
   }
   return opts
 }
 
-const coachLine = (v, equity, read) => {
-  const lines = []
+const VALUE_3BET = new Set(['AA', 'KK', 'QQ', 'JJ', 'AKs', 'AKo'])
+const VALUE_4BET = new Set(['AA', 'KK', 'QQ', 'AKs', 'AKo'])
+const VALUE_5BET = new Set(['AA', 'KK'])
+
+// The textbook play, as one instruction and the number behind it. Returns
+// { text, key } where key is what to type to make the play.
+const textbook = (v, equity, sizes) => {
   const preflop = v.street === 'preflop'
   const need = v.toCall > 0 ? v.toCall / (v.pot + v.toCall) : 0
+  const passive = v.toCall > 0 ? { word: 'Call', key: 'c' } : { word: 'Check', key: 'c' }
+  const raise = (id, word, why) => {
+    if (!v.canRaise) return { text: passive.word + ' -- ' + why + ' (no raise allowed here)', key: passive.key }
+    const i = sizes.findIndex((o) => o.id === id)
+    if (i < 0) return { text: word + ' all in -- ' + why, key: 'a' }
+    return { text: word + ' to ' + sizes[i].to + ' -- ' + why, key: String(i + 1) }
+  }
+  const byOdds = () => equity >= need
+    ? { text: 'Call -- equity ' + pct(equity) + ' is above the ' + pct(need) + ' pot odds.', key: 'c' }
+    : { text: 'Fold -- equity ' + pct(equity) + ' is below the ' + pct(need) + ' pot odds.', key: 'f' }
+
   if (preflop) {
     const pos = positionOf(v.seat, v.button, v.numPlayers)
-    const rank = handRank(handIndex(v.holeCards[0], v.holeCards[1]), 1)
-    const raised = v.history.some((a) => a.street === 'preflop' && a.type === 'raise')
-    if (!raised) {
+    const idx = handIndex(v.holeCards[0], v.holeCards[1])
+    const label = handLabel(idx)
+    const rank = handRank(idx, 1)
+    const top = 'top ' + Math.max(1, Math.round(rank)) + '%'
+    const raises = v.history.filter((a) => a.street === 'preflop' && a.type === 'raise').length
+    const limpers = v.history.filter((a) => a.street === 'preflop' && a.type === 'call').length
+    if (raises === 0) {
       if (pos === 'BB') {
-        lines.push(rank < 12 ? 'Nobody raised: a strong hand like this should raise for value.'
-          : 'Nobody raised, so you can see the flop for free -- check unless your hand is strong.')
-      } else {
-        const width = OPEN_WIDTH[pos]
-        lines.push('From ' + pos + ' a solid player raises roughly the top ' + width + '% of hands. Yours is in the top ' +
-          Math.max(1, Math.round(rank)) + '% -- ' +
-          (rank < width ? 'a raise.' : rank < width * 1.4 ? 'borderline; folding or raising are both fine.' : 'a fold for most good players.'))
+        return rank <= 10
+          ? raise('open', 'Raise', label + ' is ' + top + '; raise the top 10% over limpers from the big blind.')
+          : { text: 'Check -- ' + label + ' is ' + top + '; raise only the top 10% here.', key: 'c' }
       }
-    } else {
-      lines.push('Facing a raise you need a better hand than the raiser\'s whole range, not just a playable one: ' +
-        (equity > 0.55 ? 'you are a favourite here, so a re-raise is reasonable.'
-          : equity > need + 0.08 ? 'calling is reasonable, especially with position.'
-            : 'folding is usually right unless the price is very small.'))
+      const width = limpers ? Math.round(OPEN_WIDTH[pos] * 0.6) : OPEN_WIDTH[pos]
+      const range = (limpers ? 'the over-limper range from ' : 'the opening range from ') + pos + ' is the top ' + width + '%'
+      return rank < width
+        ? raise('open', 'Raise', range + '; ' + label + ' is ' + top + '.')
+        : { text: 'Fold -- ' + range + '; ' + label + ' is ' + top + '.', key: 'f' }
     }
-    return lines
+    if (raises === 1 && VALUE_3BET.has(label)) {
+      const inBlinds = pos === 'SB' || pos === 'BB'
+      return raise(inBlinds ? 'oop' : 'ip', '3-bet', 'JJ+ and AK are value 3-bets.')
+    }
+    if (raises === 2 && VALUE_4BET.has(label)) return raise('reraise', '4-bet', 'QQ+ and AK are value 4-bets.')
+    if (raises >= 3 && VALUE_5BET.has(label)) return { text: 'All in -- AA and KK get it in.', key: v.canRaise ? 'a' : 'c' }
+    return byOdds()
   }
+
   if (v.toCall > 0) {
-    if (equity > need + 0.12) lines.push('Your equity clears the price comfortably -- calling (or raising for value) shows a profit.')
-    else if (equity > need - 0.04) lines.push('A close call on the numbers. Position, the bettor\'s type and future bets decide it.')
-    else if (read.outs >= 8 && v.street !== 'river') lines.push('Behind on the numbers, but a real draw: a call can pay if you will win a big pot when it hits (implied odds).')
-    else lines.push('Your equity is below the price. Calling only works if they bluff more often than these numbers assume.')
-  } else {
-    if (equity > 0.65) lines.push('You are likely ahead. Betting makes worse hands pay you; checking risks giving free cards.')
-    else if (equity > 0.4) lines.push('Medium strength: a check keeps the pot small, a modest bet can take it down or protect.')
-    else lines.push('Probably behind. Check, or bet as a bluff if this opponent folds often.')
+    if (equity >= 0.7) return raise('value', 'Raise', 'equity ' + pct(equity) + ' is a value raise.')
+    return byOdds()
   }
-  lines.push(dim('Equity guesses ranges from the preflop action only; a bet after the flop usually means a stronger hand than that.'))
-  return lines
+  if (equity >= 0.6) return raise('value', 'Bet', 'equity ' + pct(equity) + ' is a value bet.')
+  const opponents = v.folded.filter((f, s) => s !== v.seat && v.inHand[s] && !f).length
+  if (v.street === 'flop' && hand.preflopRaiser === v.seat && opponents === 1) {
+    return raise('cbet', 'C-bet', 'the preflop raiser c-bets the flop heads-up.')
+  }
+  return { text: 'Check -- equity ' + pct(equity) + ' is below a value bet (60%).', key: 'c' }
+}
+
+// Lays out items on lines no wider than `width`, measured without colour codes.
+const wrapItems = (items, width, indent) => {
+  const plain = (s) => s.replace(/\x1b\[[0-9;]*m/g, '')
+  const lines = []
+  let line = ''
+  for (const it of items) {
+    if (line && plain(line).length + 3 + plain(it).length > width) {
+      lines.push(line)
+      line = ''
+    }
+    line += (line ? '   ' : '') + it
+  }
+  if (line) lines.push(line)
+  return lines.map((l) => indent + l)
 }
 
 const heroAct = (v) => {
@@ -791,53 +748,51 @@ const heroAct = (v) => {
 
   const preflop = v.street === 'preflop'
   const pos = positionOf(v.seat, v.button, v.numPlayers)
-  const opponents = opponentRanges(v, kinds)
-  const read = readHand(v.holeCards, v.board)
+  const opponents = opponentRanges(v)
   const equity = equityVs(v.holeCards, v.board, opponents)
   const need = v.toCall > 0 ? v.toCall / (v.pot + v.toCall) : 0
+  const live = v.folded.filter((f, s) => s !== v.seat && v.inHand[s] && !f).length
 
-  say('')
-  say(green(bold('>> Your turn')) + dim(' -- ' + STREET_LABEL[v.street].toLowerCase() + ', ' + pos))
-  say('   Your cards  ' + cards(v.holeCards) + (v.board.length ? '     Board  ' + cards(v.board) : ''))
-  say('   Pot ' + bold(v.pot) + '     Your stack ' + bold(v.stack) + dim(' (' + bb(v.stack) + ')') +
-    '     Opponents still in: ' + v.folded.filter((f, s) => s !== v.seat && v.inHand[s] && !f).length)
-  if (!preflop) {
-    say('   Hand        ' + read.made)
-    if (read.draws.length) say('   Drawing to  ' + read.draws.join(', '))
+  say(green(bold('>> ' + STREET_LABEL[v.street].toLowerCase() + ', ' + pos)) +
+    '   pot ' + bold(v.pot) + '   stack ' + bold(v.stack) + dim(' (' + bb(v.stack) + ')') +
+    '   ' + live + ' opponent' + (live === 1 ? '' : 's'))
+  if (preflop) {
+    const idx = handIndex(v.holeCards[0], v.holeCards[1])
+    say('   ' + cards(v.holeCards) + '  ' + handName(idx) + dim(', top ' + Math.max(1, Math.round(handRank(idx, 1))) + '% of hands'))
+  } else {
+    const read = readHand(v.holeCards, v.board)
+    let line = '   ' + cards(v.holeCards) + '  ' + read.made + (read.draws.length ? dim(' + ') + read.draws.join(', ') : '')
     if (read.outs > 0 && v.street !== 'river') {
       const toCome = 5 - v.board.length
-      say('   Outs        about ' + read.outs + dim(' -> roughly ' + Math.min(100, read.outs * (toCome === 2 ? 4 : 2)) +
-        '% to improve by the river (rule of ' + (toCome === 2 ? '4' : '2') + ')'))
+      line += dim('   ' + read.outs + ' outs ~ ' + Math.min(100, read.outs * (toCome === 2 ? 4 : 2)) + '% by the river')
     }
+    say(line)
   }
+  const sizes = sizeOptions(v)
   if (COACH) {
-    say('   Equity      ' + bold(pct(equity)) + dim(' against ' + opponents.map((o) =>
-      names[o.seat] + ' (~top ' + Math.round(o.width) + '%)').join(', ')))
+    let line = '   equity ' + bold(pct(equity)) + dim(' vs ' + opponents.map((o) =>
+      names[o.seat] + ' ' + Math.round(o.width) + '%').join(', '))
     // Limping in before anyone raises is not a pot-odds decision, and quoting
     // one there would make limping look like a price worth paying.
     const opened = v.history.some((a) => a.street === 'preflop' && a.type === 'raise')
     if (v.toCall > 0 && (!preflop || opened)) {
-      say('   Price       ' + 'call ' + bold(v.toCall) + ' to win ' + v.pot + dim(' -> you need ' + pct(need) +
-        ' equity to break even (pot odds)'))
+      line += '   pot odds ' + bold(pct(need)) + dim(' (' + v.toCall + ' to win ' + v.pot + ')')
     }
-    for (const line of coachLine(v, equity, read)) say('   ' + magenta('Coach') + '       ' + line)
-  } else if (v.toCall > 0) {
-    say('   To call     ' + bold(v.toCall))
+    say(line)
+    const book = textbook(v, equity, sizes)
+    say('   ' + magenta('textbook') + '  ' + book.text + dim('  [' + book.key + ']'))
   }
 
-  const sizes = sizeOptions(v)
-  const verb = v.toCall === 0 && Math.max(...v.committed) === 0 ? 'bet' : 'raise to'
-  say('')
-  say('   ' + bold('f') + '  fold')
-  say('   ' + bold('c') + '  ' + (v.toCall > 0 ? 'call ' + v.toCall + (v.toCall >= v.stack ? ' (all in)' : '') : 'check'))
-  sizes.forEach((o, i) => say('   ' + bold(String(i + 1)) + '  ' + verb + ' ' + o.to + dim('   ' + o.label +
-    (v.street === 'preflop' ? '' : '') + ' (' + bb(o.to) + ')')))
-  if (v.canRaise) say('   ' + bold('a') + '  all in for ' + v.maxRaiseTo + dim('   (' + bb(v.maxRaiseTo) + ')'))
-  say(dim('   r <amount> to ' + (verb === 'bet' ? 'bet' : 'raise to') + ' any amount  ·  ? help  ·  t table  ·  p players  ·  s stats  ·  q quit'))
+  const verb = v.toCall === 0 && Math.max(...v.committed) === 0 ? 'bet' : 'raise'
+  const items = [bold('f') + ' fold', bold('c') + ' ' + (v.toCall > 0 ? 'call ' + v.toCall + (v.toCall >= v.stack ? ' (all in)' : '') : 'check')]
+  sizes.forEach((o, i) => items.push(bold(String(i + 1)) + ' ' + verb + ' ' + o.to + dim(' ' + o.label)))
+  if (v.canRaise) items.push(bold('a') + ' all in ' + v.maxRaiseTo)
+  items.push(dim('? help'))
+  for (const l of wrapItems(items, 96, '   ')) say(l)
 
   while (true) {
     const input = ask(green('> '))
-    if (input === '' ) continue
+    if (input === '') continue
     if (input === '?' || input === 'h' || input === 'help') {
       say(HELP)
       continue
@@ -855,7 +810,7 @@ const heroAct = (v) => {
     }
     if (input === 'f' || input === 'fold') {
       if (v.toCall === 0) {
-        say(dim('   Checking is free here, so you check instead of folding.'))
+        say(dim('   Nothing to call -- you check.'))
         return { action: 'check' }
       }
       return { action: 'fold' }
@@ -865,7 +820,7 @@ const heroAct = (v) => {
     }
     if (input === 'a' || input === 'allin' || input === 'all in') {
       if (!v.canRaise) {
-        say(dim('   You cannot raise here -- call (c) puts you all in if it covers your stack.'))
+        say(dim('   You cannot raise here -- c calls, which puts you all in if it covers your stack.'))
         continue
       }
       return { action: 'raise', to: v.maxRaiseTo }
@@ -929,24 +884,14 @@ const playOne = (button) => {
     pot: SMALL_BLIND + BIG_BLIND,
     hole: [deck[k], deck[k + 6]],
     heroFolded: false,
-    preflopRaiser: -1
+    preflopRaiser: -1,
+    rest: []
   }
 
-  say('')
-  say(bold('=================== Hand #' + session.hands + ' ===================') +
-    dim('   blinds ' + SMALL_BLIND + '/' + BIG_BLIND))
-  showTable(null, button)
-  const idx = handIndex(hand.hole[0], hand.hole[1])
-  const label = handLabel(idx)
-  const nick = NICKNAMES[label] ? ' "' + NICKNAMES[label] + '"' : ''
   const pos = positionOf(HERO, button, 6)
   say('')
-  say('  Your cards: ' + cards(hand.hole) + '   ' + bold(handName(idx)) + dim(nick))
-  say('  ' + dim('That is ' + handClass(idx) + '. Top ' + Math.max(1, Math.round(handRank(idx, 1))) +
-    '% of starting hands.'))
-  say('  ' + dim('You are ' + pos + ': ' + POSITION_BLURB[pos]))
-  say('')
-  say(yellow(bold('--- PRE-FLOP ---')) + dim('   (blinds are in; the action starts left of the big blind)'))
+  say(bold('-- Hand ' + session.hands + ' --') + '  ' + cards(hand.hole) + '   you are ' + bold(pos) +
+    dim('   stack ' + stacks[HERO]))
 
   const startStack = stacks[HERO]
   const result = playHand({
@@ -967,10 +912,13 @@ const playOne = (button) => {
   let first = true
   for (const st of ['flop', 'turn', 'river']) {
     if (LEN[st] <= shown || LEN[st] > result.board.length) continue
-    sleep(FAST ? 0 : 900)
+    if (!hand.heroFolded) sleep(PACE * 2)
     hand.street = st
-    streetHeader(st, result.board, first ? '(no more betting -- the cards run out)' : '')
+    streetHeader(st, result.board, first ? '(all in -- no more betting)' : '')
     first = false
+  }
+  if (hand.rest.length) {
+    for (const l of wrapItems(hand.rest.map((t) => dim(t)), 96, '  ')) say(l)
   }
 
   report(result, startStack)
@@ -980,16 +928,13 @@ const playOne = (button) => {
 }
 
 const report = (result, startStack) => {
-  say('')
   if (result.wentToShowdown) {
-    say(bold('Showdown'))
     const best = Math.max(...result.showdown.map((sd) => sd.score))
     for (const sd of result.showdown) {
       const r = readHandName(sd.score)
-      say('  ' + who(sd.seat, hand) + '  ' + cards(result.holeCards[sd.seat]) + '   ' +
+      say('  ' + who(sd.seat, hand) + (sd.seat === HERO ? ' show ' : ' shows ') + cards(result.holeCards[sd.seat]) + '  ' +
         (sd.score === best ? bold(r) : r))
     }
-    if (hand.heroFolded) say(dim('  (you folded ' + cards(hand.hole) + ')'))
   }
   // The engine builds a pot layer at every distinct commitment level, folded
   // players included, so layers contested by the same players are one pot as
@@ -1011,7 +956,7 @@ const report = (result, startStack) => {
   }
   for (const w of takes.values()) {
     const potName = groupKeys.length > 1 ? (w.group === 0 ? ' from the main pot' : ' from side pot ' + w.group) : ''
-    const how = result.wentToShowdown ? '' : dim(' -- everyone else folded, no cards shown')
+    const how = result.wentToShowdown ? '' : dim(' (no showdown)')
     say('  ' + who(w.seat, hand) + (w.seat === HERO ? ' win ' : ' wins ') + bold(w.amount) + potName + how)
   }
 
@@ -1027,13 +972,21 @@ const report = (result, startStack) => {
   const won = result.winners.filter((w) => w.seat === HERO).reduce((a, w) => a + w.amount, 0)
   if (won > session.biggestPot) session.biggestPot = won
 
-  say('')
-  const chips = (n) => n + (Math.abs(n) === 1 ? ' chip' : ' chips')
-  const line = delta > 0 ? green(bold('You won ' + chips(delta))) + dim(' (' + signed(delta / BIG_BLIND) + ' bb)')
-    : delta < 0 ? red('You lost ' + chips(-delta)) + dim(' (' + (delta / BIG_BLIND) + ' bb)')
-      : dim('You broke even this hand.')
-  say('  ' + line + '     stack ' + bold(result.stacks[HERO]) +
-    dim('     session ' + signed(session.net) + ' over ' + session.hands + ' hand' + (session.hands > 1 ? 's' : '')))
+  for (let s = 1; s < 6; s++) {
+    const acts = result.actions.filter((a) => a.seat === s && a.street === 'preflop')
+    seen[s].hands++
+    if (acts.some((a) => a.type === 'call' || a.type === 'raise')) seen[s].vpip++
+    if (acts.some((a) => a.type === 'raise')) seen[s].pfr++
+    if (result.wentToShowdown && result.showdown.some((sd) => sd.seat === s)) seen[s].showdowns++
+  }
+
+  // Only a hand you put money into gets a result line; a preflop fold is just
+  // the blind or nothing.
+  if (delta !== 0 || pre.some((a) => a.type !== 'fold')) {
+    const line = delta > 0 ? green(bold('+' + delta)) : delta < 0 ? red(String(delta)) : dim('±0')
+    say('  ' + line + dim(' (' + signed(delta / BIG_BLIND) + ' bb)   stack ' + result.stacks[HERO] +
+      '   session ' + signed(session.net)))
+  }
 }
 
 const readHandName = (sc) => {
@@ -1054,15 +1007,26 @@ const readHandName = (sc) => {
   }
 }
 
+const reveal = () => {
+  say('')
+  say(bold('Who was who'))
+  for (let s = 1; s < 6; s++) {
+    const p = seen[s]
+    const stat = p.hands ? dim('   you saw ' + pct(p.vpip / p.hands) + ' / ' + pct(p.pfr / p.hands) + ' over ' + p.hands + ' hands') : ''
+    say('  ' + cyan(names[s].padEnd(8)) + TYPE_LABEL[kinds[s]].padEnd(23) + stat)
+  }
+}
+
 // ------------------------------------------------------------------ main
 
 const main = () => {
   say('')
   say(bold('Texas Hold\'em -- six-max no-limit, blinds 1/2, 200-chip stacks (100 big blinds)'))
-  say(dim('You sit with five players from the fitted personality model (' + FIELD + ' field). ' +
-    'Each plays at the skill level it was calibrated to, so they make the mistakes real players make.'))
-  showPlayers()
-  say(dim('Type ? at any decision for help. The coach lines (equity, pot odds, advice) are estimates, not orders.'))
+  say(dim('Five opponents from the fitted player model (' + FIELD + ' field), fish among them. Their styles ' +
+    'are hidden: work them out from what they do (p shows their stats so far). Revealed when you leave.'))
+  say(dim('Each decision shows your equity, the pot odds and the textbook play, with the key that makes it. ' +
+    'Type ? for help.'))
+  say('  ' + names.slice(1).map((n) => cyan(n)).join('  '))
   ask(dim('Press Enter to deal. '))
 
   let button = Math.floor(rng() * 6)
@@ -1077,20 +1041,9 @@ const main = () => {
       stacks[HERO] = BUY_IN
       session.buyIns++
     }
-
-    while (true) {
-      const next = ask(dim('\n[Enter] next hand   s stats   t table   p players   q quit  '))
-      if (next === 'q') {
-        session.quit = true
-        break
-      }
-      if (next === 's') { showStats(); continue }
-      if (next === 'p') { showPlayers(); continue }
-      if (next === 't') { showTable(null, button); continue }
-      break
-    }
   }
   showStats()
+  reveal()
   say('')
   say('Thanks for playing.')
 }
