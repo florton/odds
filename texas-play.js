@@ -11,10 +11,12 @@
 //
 // Six-max no-limit, blinds 1/2, everybody starts with 200 (100 big blinds).
 // You are seat 0 in texas-engine.js like any other bot: your `act` just reads
-// the keyboard instead of a model. The five opponents are the fitted
-// personalities from texas-players.js, each at the proficiency it was fitted
-// at, so the table plays the way the measured population does. Every field
-// has at least one fish (a station or a maniac) in it.
+// the keyboard instead of a model. The five opponents come from
+// texas-opponents.js: regulars who read lines, keep a HUD on every seat (you
+// included) and adjust, and fish with the systematic leaks real fish have.
+// Every field has at least one fish (a station or a maniac) in it. The
+// textbook line the coach shows is texas-textbook.js; played blindly it
+// breaks about even at the realistic table (`node texas-textbook.js --table`).
 //
 // The narration is rebuilt from the hand's public history -- the same record
 // the bots decide from -- so nothing printed here is information a player at
@@ -29,9 +31,9 @@ const {
   RANKS, evaluate, categoryOf,
   PAIR, TWO_PAIR, TRIPS, STRAIGHT, FLUSH, FULL_HOUSE, QUADS, STRAIGHT_FLUSH
 } = require('./texas-eval')
-const { handIndex, handLabel, handRank, countOuts } = require('./texas-equity')
-const { archetype, PARAMS } = require('./texas-players')
-const { fieldSkill } = require('./texas-calibrate')
+const { handIndex, handRank, countOuts } = require('./texas-equity')
+const { positionOf, opponentRanges, equityVs, sizeOptions, decide } = require('./texas-textbook')
+const { makeOpponent } = require('./texas-opponents')
 
 // ------------------------------------------------------------------ options
 
@@ -162,14 +164,6 @@ const ask = (prompt) => {
   return line.trim().toLowerCase()
 }
 
-// ------------------------------------------------------------------ positions
-
-const POSITIONS = ['BTN', 'SB', 'BB', 'UTG', 'HJ', 'CO']
-// Standard six-max opening ranges, in percent of hands, for a first-in raise.
-const OPEN_WIDTH = { UTG: 15, HJ: 19, CO: 27, BTN: 45, SB: 38, BB: 0 }
-
-const positionOf = (seat, button, n) => POSITIONS[(seat - button + n) % n]
-
 // ------------------------------------------------------------------ hand reading
 
 const handName = (idx) => {
@@ -294,109 +288,6 @@ const describeBoard = (board) => {
   return notes.join(', ')
 }
 
-// ------------------------------------------------------------------ equity
-//
-// A Monte Carlo of the hero's hand against a guessed range for every live
-// opponent. The guess comes off their preflop line only -- the same population
-// read the bots use (PARAMS.rangeOpen and friends) -- and is the same for
-// every opponent, since you do not know who is who. It does not narrow for
-// postflop bets.
-
-const COMBOS = (() => {
-  const out = []
-  for (let a = 0; a < 52; a++) {
-    for (let b = a + 1; b < 52; b++) out.push({ a, b, rank: handRank(handIndex(a, b), 1) })
-  }
-  return out.sort((x, y) => x.rank - y.rank)
-})()
-
-const sampleHand = (widthPct, dead) => {
-  const limit = Math.max(12, Math.min(COMBOS.length, Math.round(widthPct / 100 * COMBOS.length)))
-  for (let tries = 0; tries < 80; tries++) {
-    const c = COMBOS[Math.floor(Math.random() * limit)]
-    if (!dead[c.a] && !dead[c.b]) return c
-  }
-  for (let tries = 0; tries < 2000; tries++) {
-    const c = COMBOS[Math.floor(Math.random() * COMBOS.length)]
-    if (!dead[c.a] && !dead[c.b]) return c
-  }
-  return null
-}
-
-const opponentRanges = (v) => {
-  let raises = 0
-  let bet = v.bigBlind
-  let lastRaise = 100
-  const sb = v.numPlayers === 2 ? v.button : (v.button + 1) % v.numPlayers
-  const width = {}
-  for (const a of v.history) {
-    if (a.street !== 'preflop') continue
-    if (a.type === 'raise') {
-      const size = a.to / bet
-      bet = a.to
-      raises++
-      lastRaise = PARAMS.rangeOpen * Math.pow(PARAMS.rangeStep, raises - 1) *
-        Math.pow(Math.min(1, 3 / size), PARAMS.rangeSizeExp)
-      width[a.seat] = lastRaise
-    } else if (a.type === 'call') {
-      width[a.seat] = raises === 0 ? (a.seat === sb ? 70 : 45) : Math.min(60, lastRaise * 1.6 + 4)
-    } else if (a.type === 'check' && width[a.seat] === undefined) {
-      width[a.seat] = 100
-    }
-  }
-  // Before the flop, once somebody has come in, the players still to act are
-  // left out: most of them will fold, and counting them as random hands would
-  // make every call look worse than it is.
-  const entered = v.street === 'preflop' &&
-    v.history.some((a) => a.seat !== v.seat && (a.type === 'call' || a.type === 'raise'))
-  const out = []
-  for (let s = 0; s < v.numPlayers; s++) {
-    if (s === v.seat || !v.inHand[s] || v.folded[s]) continue
-    if (entered && width[s] === undefined) continue
-    const base = width[s] === undefined ? 100 : width[s]
-    out.push({ seat: s, width: Math.max(1.5, Math.min(100, base)) })
-  }
-  return out
-}
-
-const equityVs = (hole, board, ranges, trials = 3000) => {
-  let won = 0
-  const dead = new Uint8Array(52)
-  for (let t = 0; t < trials; t++) {
-    dead.fill(0)
-    for (const c of hole) dead[c] = 1
-    for (const c of board) dead[c] = 1
-    const opp = []
-    for (const r of ranges) {
-      const h = sampleHand(r.width, dead)
-      if (!h) break
-      dead[h.a] = 1
-      dead[h.b] = 1
-      opp.push([h.a, h.b])
-    }
-    const full = board.slice()
-    while (full.length < 5) {
-      const c = Math.floor(Math.random() * 52)
-      if (dead[c]) continue
-      dead[c] = 1
-      full.push(c)
-    }
-    const mine = evaluate(hole.concat(full))
-    let best = 0
-    let ties = 0
-    for (const o of opp) {
-      const s = evaluate(o.concat(full))
-      if (s > best) best = s
-    }
-    if (mine > best) won += 1
-    else if (mine === best) {
-      for (const o of opp) if (evaluate(o.concat(full)) === mine) ties++
-      won += 1 / (ties + 1)
-    }
-  }
-  return won / trials
-}
-
 // ------------------------------------------------------------------ session state
 
 const rng = makeRng(SEED)
@@ -405,7 +296,7 @@ const seatRng = makeRng((SEED ^ 0x9e3779b9) >>> 0)
 const lineup = shuffle(FIELDS[FIELD].slice(), seatRng)
 const kinds = ['hero'].concat(lineup)
 const names = ['You'].concat(shuffle(NAME_POOL.slice(), seatRng).slice(0, lineup.length))
-const models = lineup.map((k, i) => archetype(k, fieldSkill(k), rng, names[i + 1]))
+const models = lineup.map((k, i) => makeOpponent(k, rng, names[i + 1]))
 
 const stacks = new Array(6).fill(BUY_IN)
 const session = {
@@ -559,11 +450,19 @@ const HELP = [
   bold('Textbook line'),
   '  Preflop: raise first in with the standard opening range for your seat',
   '  (UTG 15%, HJ 19%, CO 27%, BTN 45%, SB 38%), never limp; over limpers raise',
-  '  a range 60% as wide. Re-raise for value with JJ+ and AK, 4-bet QQ+ and AK,',
-  '  5-bet AA and KK. Otherwise call a raise when equity beats the pot odds.',
+  '  a range 60% as wide. Facing a raise: 3-bet JJ+ and AK, call pairs when 15x',
+  '  the call is behind, call the top 8% in position, defend the big blind with',
+  '  the top 20% (35% against a late-position raise) at a price; the small',
+  '  blind 3-bets or folds. Facing a 3-bet: 4-bet QQ+ and AK, call JJ, TT, AQs.',
+  '  Facing a 4-bet: AA and KK get it in, QQ and AK call a shove.',
   '  Postflop: bet or raise for value at 60% / 70% equity, c-bet the flop',
   '  heads-up as the preflop raiser, otherwise call when equity beats the pot',
   '  odds and fold when it does not.',
+  '',
+  bold('About the table'),
+  '  The regulars read your whole line, keep stats on you and adjust. The',
+  '  textbook line does not: its equity counts only the preflop action, so',
+  '  following it blindly pays off their bets. It breaks about even here.',
   ''
 ].join('\n')
 
@@ -612,118 +511,6 @@ const showStats = () => {
   if (s.showdowns) say('  showdowns won  ' + s.showdownsWon + ' of ' + s.showdowns)
   if (s.biggestPot) say('  biggest pot    ' + s.biggestPot)
   say(dim('  Over a few hundred hands, results swing 20+ bb/100 either way.'))
-}
-
-// The bet / raise sizes worth offering in this spot, as "raise to" totals.
-// `id` is what the textbook line refers to.
-const sizeOptions = (v) => {
-  const opts = []
-  if (!v.canRaise) return opts
-  const curBet = Math.max(...v.committed)
-  const pot = v.pot
-  const preflop = v.street === 'preflop'
-  const add = (to, label, id) => {
-    to = Math.round(to)
-    if (to < v.minRaiseTo) to = v.minRaiseTo
-    if (to >= v.maxRaiseTo) return
-    const same = opts.find((o) => o.to === to)
-    if (same) {
-      if (id && !same.id) same.id = id
-      return
-    }
-    opts.push({ to, label, id })
-  }
-  if (preflop && curBet <= v.bigBlind) {
-    const limpers = v.history.filter((a) => a.street === 'preflop' && a.type === 'call').length
-    const extra = limpers * v.bigBlind
-    const plus = limpers ? '+' + limpers : ''
-    add(2.5 * v.bigBlind + extra, '2.5x' + plus)
-    add(3 * v.bigBlind + extra, '3x' + plus, 'open')
-    add(4 * v.bigBlind + extra, '4x' + plus)
-  } else if (preflop) {
-    const raises = v.history.filter((a) => a.street === 'preflop' && a.type === 'raise').length
-    if (raises >= 2) add(2.3 * curBet, '2.3x', 'reraise')
-    add(3 * curBet, '3x', raises === 1 ? 'ip' : undefined)
-    add(4 * curBet, '4x', raises === 1 ? 'oop' : undefined)
-    add(curBet + pot + v.toCall, 'pot')
-  } else if (curBet === 0) {
-    add(pot / 3, '1/3 pot')
-    add(pot / 2, '1/2 pot', 'cbet')
-    add(pot * 2 / 3, '2/3 pot', 'value')
-    add(pot, 'pot')
-  } else {
-    add(v.minRaiseTo, 'min')
-    add(curBet + (pot + v.toCall) * 0.66, '2/3 pot', 'value')
-    add(curBet + pot + v.toCall, 'pot')
-  }
-  opts.sort((x, y) => x.to - y.to)
-  // A minimum raise is worth offering against a bet; a 2-chip lead into a
-  // big pot is not.
-  if (curBet > 0 && opts.length && opts[0].to !== v.minRaiseTo && v.minRaiseTo < v.maxRaiseTo) {
-    opts.unshift({ to: v.minRaiseTo, label: 'min' })
-  }
-  return opts
-}
-
-const VALUE_3BET = new Set(['AA', 'KK', 'QQ', 'JJ', 'AKs', 'AKo'])
-const VALUE_4BET = new Set(['AA', 'KK', 'QQ', 'AKs', 'AKo'])
-const VALUE_5BET = new Set(['AA', 'KK'])
-
-// The textbook play, as one instruction and the number behind it. Returns
-// { text, key } where key is what to type to make the play.
-const textbook = (v, equity, sizes) => {
-  const preflop = v.street === 'preflop'
-  const need = v.toCall > 0 ? v.toCall / (v.pot + v.toCall) : 0
-  const passive = v.toCall > 0 ? { word: 'Call', key: 'c' } : { word: 'Check', key: 'c' }
-  const raise = (id, word, why) => {
-    if (!v.canRaise) return { text: passive.word + ' -- ' + why + ' (no raise allowed here)', key: passive.key }
-    const i = sizes.findIndex((o) => o.id === id)
-    if (i < 0) return { text: word + ' all in -- ' + why, key: 'a' }
-    return { text: word + ' to ' + sizes[i].to + ' -- ' + why, key: String(i + 1) }
-  }
-  const byOdds = () => equity >= need
-    ? { text: 'Call -- equity ' + pct(equity) + ' is above the ' + pct(need) + ' pot odds.', key: 'c' }
-    : { text: 'Fold -- equity ' + pct(equity) + ' is below the ' + pct(need) + ' pot odds.', key: 'f' }
-
-  if (preflop) {
-    const pos = positionOf(v.seat, v.button, v.numPlayers)
-    const idx = handIndex(v.holeCards[0], v.holeCards[1])
-    const label = handLabel(idx)
-    const rank = handRank(idx, 1)
-    const top = 'top ' + Math.max(1, Math.round(rank)) + '%'
-    const raises = v.history.filter((a) => a.street === 'preflop' && a.type === 'raise').length
-    const limpers = v.history.filter((a) => a.street === 'preflop' && a.type === 'call').length
-    if (raises === 0) {
-      if (pos === 'BB') {
-        return rank <= 10
-          ? raise('open', 'Raise', label + ' is ' + top + '; raise the top 10% over limpers from the big blind.')
-          : { text: 'Check -- ' + label + ' is ' + top + '; raise only the top 10% here.', key: 'c' }
-      }
-      const width = limpers ? Math.round(OPEN_WIDTH[pos] * 0.6) : OPEN_WIDTH[pos]
-      const range = (limpers ? 'the over-limper range from ' : 'the opening range from ') + pos + ' is the top ' + width + '%'
-      return rank < width
-        ? raise('open', 'Raise', range + '; ' + label + ' is ' + top + '.')
-        : { text: 'Fold -- ' + range + '; ' + label + ' is ' + top + '.', key: 'f' }
-    }
-    if (raises === 1 && VALUE_3BET.has(label)) {
-      const inBlinds = pos === 'SB' || pos === 'BB'
-      return raise(inBlinds ? 'oop' : 'ip', '3-bet', 'JJ+ and AK are value 3-bets.')
-    }
-    if (raises === 2 && VALUE_4BET.has(label)) return raise('reraise', '4-bet', 'QQ+ and AK are value 4-bets.')
-    if (raises >= 3 && VALUE_5BET.has(label)) return { text: 'All in -- AA and KK get it in.', key: v.canRaise ? 'a' : 'c' }
-    return byOdds()
-  }
-
-  if (v.toCall > 0) {
-    if (equity >= 0.7) return raise('value', 'Raise', 'equity ' + pct(equity) + ' is a value raise.')
-    return byOdds()
-  }
-  if (equity >= 0.6) return raise('value', 'Bet', 'equity ' + pct(equity) + ' is a value bet.')
-  const opponents = v.folded.filter((f, s) => s !== v.seat && v.inHand[s] && !f).length
-  if (v.street === 'flop' && hand.preflopRaiser === v.seat && opponents === 1) {
-    return raise('cbet', 'C-bet', 'the preflop raiser c-bets the flop heads-up.')
-  }
-  return { text: 'Check -- equity ' + pct(equity) + ' is below a value bet (60%).', key: 'c' }
 }
 
 // Lays out items on lines no wider than `width`, measured without colour codes.
@@ -779,8 +566,11 @@ const heroAct = (v) => {
       line += '   pot odds ' + bold(pct(need)) + dim(' (' + v.toCall + ' to win ' + v.pot + ')')
     }
     say(line)
-    const book = textbook(v, equity, sizes)
-    say('   ' + magenta('textbook') + '  ' + book.text + dim('  [' + book.key + ']'))
+    const book = decide(v, equity, sizes)
+    const i = book.action === 'raise' ? sizes.findIndex((o) => o.to === book.to) : -1
+    const key = book.action === 'fold' ? 'f' : book.action !== 'raise' ? 'c'
+      : i >= 0 ? String(i + 1) : book.to >= v.maxRaiseTo ? 'a' : 'r ' + book.to
+    say('   ' + magenta('textbook') + '  ' + book.text + dim('  [' + key + ']'))
   }
 
   const verb = v.toCall === 0 && Math.max(...v.committed) === 0 ? 'bet' : 'raise'
@@ -862,10 +652,20 @@ const bots = [hero].concat(models.map((m) => ({
 // ------------------------------------------------------------------ a hand
 
 const playOne = (button) => {
+  // The opponents play a 100bb game the way a real table cycles: a short
+  // stack tops up, and a big one takes chips off (as if they left and sat
+  // back down). Left alone, winning regulars sat with 1000+ chips and pots ran
+  // to thousands, nothing like a 100bb cash game.
   for (let s = 1; s < 6; s++) {
     if (stacks[s] === 0) {
       stacks[s] = BUY_IN
       say(dim('  ' + names[s] + ' reloads for ' + BUY_IN + '.'))
+    } else if (stacks[s] < BUY_IN / 2) {
+      say(dim('  ' + names[s] + ' tops up to ' + BUY_IN + '.'))
+      stacks[s] = BUY_IN
+    } else if (stacks[s] > BUY_IN * 1.5) {
+      say(dim('  ' + names[s] + ' takes ' + (stacks[s] - BUY_IN) + ' off the table, back to ' + BUY_IN + '.'))
+      stacks[s] = BUY_IN
     }
   }
 
@@ -1022,7 +822,7 @@ const reveal = () => {
 const main = () => {
   say('')
   say(bold('Texas Hold\'em -- six-max no-limit, blinds 1/2, 200-chip stacks (100 big blinds)'))
-  say(dim('Five opponents from the fitted player model (' + FIELD + ' field), fish among them. Their styles ' +
+  say(dim('Five opponents (' + FIELD + ' field): regulars who read your line and keep stats on you, and fish. Their styles ' +
     'are hidden: work them out from what they do (p shows their stats so far). Revealed when you leave.'))
   say(dim('Each decision shows your equity, the pot odds and the textbook play, with the key that makes it. ' +
     'Type ? for help.'))

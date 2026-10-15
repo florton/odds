@@ -49,7 +49,8 @@ node blackjack.js basic.json 6 0.75 count   # count a 6-deck shoe cut at 75%
 
 node texas.js                      # deal and print one Hold'em hand
 node texas.js --watch 5            # watch 5 hands dealt to the fitted personalities
-node texas-play.js                 # sit down and play them yourself, types hidden (--field tough|soft, --slow, --no-coach)
+node texas-play.js                 # sit down at the play table yourself, types hidden (--field tough|soft, --slow, --no-coach)
+node texas-textbook.js --table     # how plain textbook play does at the play table (the realism check)
 node texas.js --test               # engine invariant checks
 node texas-eval.js --enumerate     # verify the evaluator on all 133M seven-card hands
 node texas-calibrate.js --check    # how well the players match real statistics
@@ -146,6 +147,8 @@ bugs fixed along the way (see the [changelog](CHANGELOG.md)).
 | `texas-results.js` | The experiments below. |
 | `texas-strategy.js` | Solves preflop rules ("raise the top X% from this seat") as a best response to a fitted field, by forced replays on common random numbers. |
 | `texas.js` | Measurement harness: bb/100 with standard errors, paired comparison, duplicate dealing, engine tests. |
+| `texas-textbook.js` | The textbook player the play table's coach recommends, as a bot, and a benchmark of it against any field. |
+| `texas-opponents.js` | The play table's opponents: regulars who read lines and keep a HUD, and fish with systematic leaks, tuned so the money looks like a real table. |
 
 **Personality and skill are separate dials.** Personality biases the value of each action
 through five traits: looseness, preflop aggression, postflop aggression, stickiness and
@@ -318,6 +321,39 @@ direction, but the size is still uncertain, because the fish's showdown
 rates remain below target (see Limitations). Earlier exploits it found -- a TAG type
 that folded to 3-bets 80% of the time, a station that called pot-sized river
 bets with nothing -- were fixed in the model.
+
+### The play table
+
+`texas-play.js` seats you with five opponents whose types are hidden until you leave. They
+are not the fitted model above, because measured from the hero's chair that model's money
+is far from a real table. Plain textbook play (`texas-textbook.js`: a preflop chart, value
+bets at 60% equity, pot-odds calls) won **+150 bb/100** against the realistic field. The
+fitted TAG won +48 from the same seat, and +53 at perfect skill: its value model rates
+checking above betting until a hand is nearly the nuts, and it reads hands against random
+holdings whatever the preflop action said. Its fish, whose personality bias is bounded in
+pots, call off whole stacks with ace high in big pots.
+
+`texas-opponents.js` puts every seat on one core: textbook play plus line reading (equity
+against preflop ranges weighted by how likely each holding was to bet, raise or call),
+position, a HUD on every seat (the hero included), and mixed c-bets, barrels and bluffs.
+The fish are the same core with explicit leaks: the station limps and calls with any pair
+or draw, and the maniac opens wide, barrels and bluff-raises. The settings are tuned
+against the stat targets above and against the money. The textbook player at the play
+table, 16,000 hands per run, two seeds:
+
+| field | textbook bb/100 | station | maniac |
+|---|---|---|---|
+| realistic | +5, +24 (se 13) | -77, -88 | -120, -148 |
+| tough | -15, -33 (se 11) | -155, -128 | -- |
+| soft | +28, +37 (se 14) | -50 to -63 | -67, -104 |
+
+So following the coach blindly loses to the regulars, roughly breaks even at a normal table
+and beats the fish. The regulars beat it because its equity counts only the preflop action
+and pays off their bets. In the play sim itself, with the opponents' stacks cycled between
+50 and 150bb, four 1,700-hand sessions following the coach's key ran 0, -33, +46 and -33
+bb/100. Known gaps: showdown rates run high at every seat (36-46% against 24-42 targets,
+partly the two loose fish), the station wins too many of its showdowns (53% against 40-48),
+and the regulars 3-bet a little light.
 
 ## Measuring honestly
 

@@ -10,6 +10,39 @@ could not be right.
 
 ---
 
+## Unreleased: a play table that plays back
+
+Measured from the hero's chair, the fitted field was soft: plain textbook play won
++150 bb/100 in the realistic field, the fitted TAG +48 and a perfect-skill TAG +53. Three
+causes, each confirmed by experiment:
+
+- **The regulars almost never bet for value.** With the fitted fold-equity and caller
+  constants, a 2/3-pot bet with 70% equity is valued below a check. The textbook player bet
+  the flop four times as often as the TAG. Giving the model honest beliefs fixed the c-bet
+  rate (37% to 58%) but not the money.
+- **They read hands against random holdings**, whatever the preflop action said. Swapping in
+  a Monte Carlo read against preflop ranges did not close the gap either: the shortfall is
+  in how the fitted values become actions.
+- **The fish punt stacks.** Personality is bounded in pots, so in a big pot it is worth a
+  stack: the station called off 100bb with ace high and called 4-bets with A7o. Capping the
+  decision noise and the bias in big blinds helped (fish losses -470 to -350 bb/100
+  combined) but not enough.
+
+So the play table now has its own opponents, `texas-opponents.js`, one core for every type
+(textbook play plus line reading, position, a HUD, mixed bluffs) with fish as explicit,
+systematic leaks, tuned to the stat targets and to the money. Textbook play there makes
+about +5 to +25 in the realistic field, -15 to -35 in the tough one and +30 to +40 in the
+soft one. The fitted model is unchanged and still drives the research.
+
+Also: the textbook player moved to `texas-textbook.js` (coach and benchmark); its preflop
+advice is now a chart rather than pot odds, which had it cold-calling raises with VPIP 26-31
+and PFR 10-14. Its range reads use standard widths: the fitted `rangeStep` read a 3-bet as
+the top 2.7%. The play table cycles opponents' stacks between 50 and 150bb. Before that,
+winning regulars sat with 1,000+ chips and four sessions of textbook play swung from -60
+to +246.
+
+---
+
 ## Unreleased: the money after the flop, and rules instead of charts
 
 The last entry ended with the field paying off: the solved charts valued aces
